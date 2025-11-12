@@ -10,6 +10,7 @@ The site is automatically deployed to GitHub Pages at: https://jprier.github.io/
 
 - **Hello World Landing Page** - Beautiful, responsive design with gradient background
 - **Rust + WebAssembly Backend** - All counter logic and memory management handled by Rust compiled to WASM
+- **AI Decision Scoring System** - Advanced strategic AI for country-based simulation games
 - **Svelte + TypeScript Frontend** - Reactive UI components with type safety for DOM manipulation
 - **Interactive Counter** - Demonstrates seamless integration between Svelte UI and Rust/WASM logic
 - **Static Site Generation** - Fast loading times with pre-rendered HTML
@@ -107,7 +108,15 @@ cd wasm-counter && cargo test
 │       └── ...
 ├── wasm-counter/            # Rust/WASM source
 │   ├── src/
-│   │   └── lib.rs           # Counter logic in Rust
+│   │   ├── lib.rs           # Counter logic in Rust
+│   │   └── decision_scoring/ # AI Decision Scoring System
+│   │       ├── mod.rs       # Module definitions
+│   │       ├── luts.rs      # Lookup tables (sigmoid, log-ratio, etc.)
+│   │       ├── country.rs   # Country state and adaptive weights
+│   │       ├── actions.rs   # Action types and candidate pruning
+│   │       ├── scoring.rs   # Six-channel decision scoring
+│   │       ├── world.rs     # World state and tick execution
+│   │       └── README.md    # AI system documentation
 │   └── Cargo.toml           # Rust project configuration
 ├── .github/
 │   └── workflows/
