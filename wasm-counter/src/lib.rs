@@ -99,24 +99,51 @@ pub struct AiEntity {
 impl AiEntity {
     /// Create a new AI entity with default values
     pub fn new(id: u32) -> Self {
+        // Create per-entity variation for initial state
+        // Use id as seed for deterministic but varied initialization
+        let id_seed = id as f32;
+        let variation = ((id_seed * 0.7321).sin() + 1.0) / 2.0; // 0.0 to 1.0 range
+        
+        // Vary initial energy between 50 and 100
+        let initial_energy = 50.0 + (variation * 50.0);
+        
+        // Vary initial health between 70 and 100  
+        let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
+        let initial_health = 70.0 + (health_variation * 30.0);
+        
+        // Randomize initial state based on id
+        let state_seed = ((id_seed * 2.718).sin() + 1.0) / 2.0;
+        let initial_state = if state_seed < 0.25 {
+            AiState::Idle
+        } else if state_seed < 0.5 {
+            AiState::Active
+        } else if state_seed < 0.75 {
+            AiState::Resting
+        } else {
+            AiState::Moving
+        };
+        
         Self {
             id,
-            health: 100.0,
-            energy: 100.0,
+            health: initial_health,
+            energy: initial_energy,
             position_x: 0.0,
             position_y: 0.0,
-            state: AiState::Idle,
+            state: initial_state,
         }
     }
 
     /// Update the entity for one simulation tick
     pub fn update(&mut self, tick: u64) {
         // Deterministic update logic based on tick and entity id
-        let seed = (tick.wrapping_mul(1000) + self.id as u64) as f32;
+        // Use a better pseudo-random variation that's unique per entity
+        let seed1 = (tick.wrapping_mul(1000) + self.id as u64) as f32;
+        let seed2 = (tick.wrapping_mul(7919) + self.id.wrapping_mul(6547) as u64) as f32;
         
         // Create entity-specific variation factors (0.5 to 1.5 range)
-        let id_factor = ((self.id as f32 * 0.1).sin() + 1.0) / 2.0 + 0.5;
-        let tick_factor = ((seed * 0.01).cos() + 1.0) / 2.0 + 0.5;
+        // Use different multipliers for better spread
+        let id_factor = ((self.id as f32 * 0.7321).sin() + 1.0) / 2.0 + 0.5;
+        let tick_factor = ((seed2 * 0.00123).cos() + 1.0) / 2.0 + 0.5;
         let variation = id_factor * tick_factor;
         
         // Energy dynamics with per-entity variation
@@ -136,8 +163,8 @@ impl AiEntity {
             AiState::Moving => {
                 self.energy = (self.energy - 0.2 * variation).max(0.0);
                 // Simple deterministic movement
-                self.position_x += (seed * 0.1).sin() * 2.0 * variation;
-                self.position_y += (seed * 0.1).cos() * 2.0 * variation;
+                self.position_x += (seed1 * 0.1).sin() * 2.0 * variation;
+                self.position_y += (seed1 * 0.1).cos() * 2.0 * variation;
                 
                 if self.energy < 50.0 {
                     self.state = AiState::Active;
@@ -329,19 +356,21 @@ mod tests {
     fn test_ai_entity_creation() {
         let entity = AiEntity::new(0);
         assert_eq!(entity.id, 0);
-        assert_eq!(entity.health, 100.0);
-        assert_eq!(entity.energy, 100.0);
+        // Initial values now have variation
+        assert!(entity.health >= 70.0 && entity.health <= 100.0);
+        assert!(entity.energy >= 50.0 && entity.energy <= 100.0);
         assert_eq!(entity.position_x, 0.0);
         assert_eq!(entity.position_y, 0.0);
-        assert_eq!(entity.state, AiState::Idle);
+        // State is now varied per entity
     }
 
     #[test]
     fn test_ai_entity_update() {
         let mut entity = AiEntity::new(0);
         entity.update(1);
-        // After one tick in Idle state, energy should increase slightly
-        assert!(entity.energy >= 100.0);
+        // Energy should change after update (may increase or decrease depending on state)
+        // Just verify the update doesn't crash
+        assert!(entity.energy >= 0.0 && entity.energy <= 100.0);
     }
 
     #[test]
@@ -400,5 +429,36 @@ mod tests {
         
         sim.set_tick_rate(30);
         assert_eq!(sim.get_tick_rate(), 30);
+    }
+
+    #[test]
+    fn test_entity_energy_variation() {
+        // Create multiple entities and verify they have different energy levels after updates
+        let mut entities = Vec::new();
+        for i in 0..10 {
+            entities.push(AiEntity::new(i));
+        }
+        
+        // Update all entities for the same tick
+        for entity in &mut entities {
+            entity.update(1);
+        }
+        
+        // Print energy values for debugging
+        for entity in &entities {
+            println!("Entity {}: energy = {}", entity.id, entity.energy);
+        }
+        
+        // Check that not all entities have the exact same energy level
+        let first_energy = entities[0].energy;
+        let all_same = entities.iter().all(|e| (e.energy - first_energy).abs() < 0.001);
+        
+        assert!(!all_same, "All entities should not have the exact same energy level after update");
+        
+        // Verify that we have at least some variation
+        let max_energy = entities.iter().map(|e| e.energy).fold(f32::NEG_INFINITY, f32::max);
+        let min_energy = entities.iter().map(|e| e.energy).fold(f32::INFINITY, f32::min);
+        
+        assert!(max_energy - min_energy > 0.0, "Entities should have varying energy levels");
     }
 }
