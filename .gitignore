@@ -24,3 +24,8 @@ pnpm-debug.log*
 *.swp
 *.swo
 *~
+
+# Rust/WASM build artifacts
+wasm-counter/target/
+wasm-counter/Cargo.lock
+src/wasm/

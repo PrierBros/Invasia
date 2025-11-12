@@ -1,15 +1,15 @@
 ---
-// Simple Astro page
+import Counter from '../components/Counter.svelte';
 ---
 
 <!doctype html>
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="description" content="Invasia - Hello World" />
+		<meta name="description" content="Invasia - Astro + Svelte + Rust/WASM" />
 		<meta name="viewport" content="width=device-width" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<title>Invasia - Hello World</title>
+		<title>Invasia - Rust + WASM + Svelte</title>
 		<style>
 			body {
 				font-family: system-ui, sans-serif;
@@ -28,79 +28,61 @@
 				border-radius: 1rem;
 				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 				max-width: 600px;
+				width: 100%;
 			}
 			h1 {
 				color: #333;
-				margin: 0 0 1rem 0;
+				margin: 0 0 0.5rem 0;
 				font-size: 3rem;
 			}
 			p {
 				color: #666;
 				font-size: 1.2rem;
-				margin-bottom: 2rem;
-			}
-			.counter {
-				padding: 1.5rem;
-				background: #f5f5f5;
-				border-radius: 0.5rem;
-				margin-top: 1rem;
-			}
-			.counter p {
-				font-size: 1.5rem;
-				font-weight: bold;
 				margin-bottom: 1rem;
-				color: #333;
 			}
-			.counter button {
-				margin: 0 0.5rem;
-				padding: 0.75rem 1.5rem;
-				font-size: 1rem;
-				background: #667eea;
-				color: white;
-				border: none;
-				border-radius: 0.5rem;
-				cursor: pointer;
-				transition: background 0.2s;
+			.tech-stack {
+				display: flex;
+				gap: 0.5rem;
+				justify-content: center;
+				flex-wrap: wrap;
+				margin-bottom: 1rem;
 			}
-			.counter button:hover {
-				background: #5568d3;
+			.tech-badge {
+				padding: 0.25rem 0.75rem;
+				border-radius: 1rem;
+				font-size: 0.875rem;
+				font-weight: 600;
 			}
-			.counter button:active {
-				transform: scale(0.95);
+			.tech-rust {
+				background: #fff3cd;
+				color: #ce422b;
+			}
+			.tech-svelte {
+				background: #ffe4e1;
+				color: #ff3e00;
+			}
+			.tech-wasm {
+				background: #e0e7ff;
+				color: #654ff0;
+			}
+			.tech-ts {
+				background: #dbeafe;
+				color: #3178c6;
 			}
 		</style>
 	</head>
 	<body>
 		<main>
 			<h1>Hello World!</h1>
-			<p>Welcome to Invasia - An Astro site with JS Islands</p>
-			
-			<!-- Interactive Counter Component (JS Island) -->
-			<div class="counter">
-				<p>Count: <span id="count">0</span></p>
-				<button id="increment">Increment</button>
-				<button id="decrement">Decrement</button>
+			<p>Welcome to Invasia - Modern Web Stack</p>
+			<div class="tech-stack">
+				<span class="tech-badge tech-rust">🦀 Rust</span>
+				<span class="tech-badge tech-wasm">⚡ WebAssembly</span>
+				<span class="tech-badge tech-svelte">🔥 Svelte</span>
+				<span class="tech-badge tech-ts">📘 TypeScript</span>
 			</div>
+			
+			<Counter client:load />
 		</main>
-
-		<script>
-			// This script runs on the client-side, making the counter a "JS Island"
-			let count = 0;
-			const countElement = document.getElementById('count');
-			const incrementButton = document.getElementById('increment');
-			const decrementButton = document.getElementById('decrement');
-
-			if (incrementButton && decrementButton && countElement) {
-				incrementButton.addEventListener('click', () => {
-					count++;
-					countElement.textContent = count.toString();
-				});
-
-				decrementButton.addEventListener('click', () => {
-					count--;
-					countElement.textContent = count.toString();
-				});
-			}
-		</script>
 	</body>
 </html>
