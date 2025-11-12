@@ -1,6 +1,10 @@
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
+// AI Decision Scoring System modules
+mod decision_scoring;
+pub use decision_scoring::*;
+
 /// Counter struct to manage counter state and logic in Rust/WASM
 #[wasm_bindgen]
 pub struct Counter {
