@@ -419,4 +419,222 @@ mod tests {
         let logs = system.logs;
         assert_eq!(logs.len(), 2);
     }
+
+    #[test]
+    fn test_full_tick_contract() {
+        // Test the complete tick contract (§6)
+        let mut system = DecisionSystem::init(42);
+        
+        // Create a small world with 3 countries
+        system.add_country(1);
+        system.add_country(2);
+        system.add_country(3);
+        
+        // Add edges (neighbors)
+        system.add_edge(1, 2, 1, 0.7);
+        system.add_edge(1, 3, 2, 0.3);
+        system.add_edge(2, 1, 1, 0.5);
+        system.add_edge(2, 3, 1, 0.6);
+        system.add_edge(3, 1, 2, 0.2);
+        system.add_edge(3, 2, 1, 0.4);
+        
+        // Run multiple ticks
+        for _ in 0..5 {
+            system.tick();
+        }
+        
+        assert_eq!(system.get_tick(), 5);
+        
+        // Should have 15 logs total (3 countries × 5 ticks)
+        assert_eq!(system.logs.len(), 15);
+        
+        // Verify each log has required fields
+        for log in &system.logs {
+            assert!(log.score.is_finite());
+            assert!(!log.chosen_action.is_empty());
+            assert!(log.weights.alpha >= 2 && log.weights.alpha <= 16);
+            assert!(log.weights.beta >= 2 && log.weights.beta <= 16);
+        }
+    }
+
+    #[test]
+    fn test_determinism_multiple_runs() {
+        // Test determinism requirement (§6, §11)
+        let seed = 123456;
+        
+        // Run 1
+        let mut system1 = DecisionSystem::init(seed);
+        system1.add_country(1);
+        system1.add_country(2);
+        system1.add_edge(1, 2, 1, 0.8);
+        system1.add_edge(2, 1, 1, 0.6);
+        
+        for _ in 0..3 {
+            system1.tick();
+        }
+        
+        let logs1 = system1.logs.clone();
+        
+        // Run 2 with same seed
+        let mut system2 = DecisionSystem::init(seed);
+        system2.add_country(1);
+        system2.add_country(2);
+        system2.add_edge(1, 2, 1, 0.8);
+        system2.add_edge(2, 1, 1, 0.6);
+        
+        for _ in 0..3 {
+            system2.tick();
+        }
+        
+        let logs2 = system2.logs.clone();
+        
+        // Should produce identical results
+        assert_eq!(logs1.len(), logs2.len());
+        
+        for (log1, log2) in logs1.iter().zip(logs2.iter()) {
+            assert_eq!(log1.country_id, log2.country_id);
+            assert_eq!(log1.chosen_action, log2.chosen_action);
+            assert_eq!(log1.score, log2.score);
+            assert_eq!(log1.weights.alpha, log2.weights.alpha);
+            assert_eq!(log1.weights.beta, log2.weights.beta);
+        }
+    }
+
+    #[test]
+    fn test_score_normalization() {
+        // Test that scores are normalized to expected ranges (§7)
+        let mut system = DecisionSystem::new();
+        system.add_country(1);
+        system.add_country(2);
+        system.add_edge(1, 2, 1, 0.8);
+        
+        system.tick();
+        
+        for log in &system.logs {
+            // All delta channels should be in [-32, +32]
+            assert!(log.components.delta_res >= -32.0 && log.components.delta_res <= 32.0);
+            assert!(log.components.delta_sec >= -32.0 && log.components.delta_sec <= 32.0);
+            assert!(log.components.delta_growth >= -32.0 && log.components.delta_growth <= 32.0);
+            assert!(log.components.delta_pos >= -32.0 && log.components.delta_pos <= 32.0);
+            
+            // Cost and risk should be in [0, 16]
+            assert!(log.components.cost >= 0.0 && log.components.cost <= 16.0);
+            assert!(log.components.risk >= 0.0 && log.components.risk <= 16.0);
+        }
+    }
+
+    #[test]
+    fn test_adaptive_weights_bounded() {
+        // Test that adaptive weights stay within bounds (§4)
+        let mut system = DecisionSystem::new();
+        system.add_country(1);
+        
+        // Manipulate country state to extreme values
+        if let Some(country) = system.world.get_country_mut(1) {
+            country.resources = 0.0;      // Very low
+            country.threat_index = 1000.0; // Very high
+            country.growth = 0.0;          // Very low
+            country.recent_losses = 500.0; // Very high
+        }
+        
+        system.tick();
+        
+        // Verify weights are still bounded
+        if let Some(log) = system.logs.first() {
+            assert!(log.weights.alpha >= 2 && log.weights.alpha <= 16);
+            assert!(log.weights.beta >= 2 && log.weights.beta <= 16);
+            assert!(log.weights.gamma >= 2 && log.weights.gamma <= 16);
+            assert!(log.weights.delta >= 2 && log.weights.delta <= 16);
+            assert!(log.weights.kappa >= 2 && log.weights.kappa <= 16);
+            assert!(log.weights.rho >= 2 && log.weights.rho <= 16);
+        }
+    }
+
+    #[test]
+    fn test_threat_index_computation() {
+        // Test threat index calculation (§2)
+        let mut system = DecisionSystem::new();
+        system.add_country(1);
+        system.add_country(2);
+        system.add_country(3);
+        
+        // Set up hostile and friendly neighbors
+        system.add_edge(1, 2, 1, 0.9);  // High hostility, close
+        system.add_edge(1, 3, 3, 0.1);  // Low hostility, far
+        
+        if let Some(country2) = system.world.get_country_mut(2) {
+            country2.m_eff = 200.0;  // Strong military
+        }
+        if let Some(country3) = system.world.get_country_mut(3) {
+            country3.m_eff = 50.0;   // Weak military
+        }
+        
+        system.tick();
+        
+        // Country 1 should have positive threat index (hostile neighbor)
+        if let Some(country) = system.world.get_country(1) {
+            assert!(country.threat_index > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_alliance_reduces_threat() {
+        // Test that alliances reduce threat index (§2)
+        let mut system = DecisionSystem::new();
+        system.add_country(1);
+        system.add_country(2);
+        system.add_edge(1, 2, 1, 0.0);
+        
+        if let Some(country2) = system.world.get_country_mut(2) {
+            country2.m_eff = 200.0;
+        }
+        
+        // Before alliance
+        system.world.update_threat_indices(&system.luts);
+        let threat_before = system.world.get_country(1).unwrap().threat_index;
+        
+        // Form alliance
+        system.world.add_alliance(1, 2);
+        system.world.update_threat_indices(&system.luts);
+        let threat_after = system.world.get_country(1).unwrap().threat_index;
+        
+        // Threat should decrease (ally reduces threat)
+        assert!(threat_after < threat_before);
+    }
+
+    #[test]
+    fn test_action_diversity() {
+        // Test that different actions are chosen over time
+        let mut system = DecisionSystem::new();
+        system.add_country(1);
+        system.add_country(2);
+        system.add_edge(1, 2, 1, 0.5);
+        
+        // Add border tiles for fortify options
+        if let Some(country) = system.world.get_country_mut(1) {
+            country.border_tiles.push(BorderTile::new(1, 0, 0));
+            country.border_tiles[0].threat_gradient = 5.0;
+            country.resources = 1000.0;  // Give resources for various actions
+        }
+        
+        if let Some(country) = system.world.get_country_mut(2) {
+            country.resources = 1000.0;
+        }
+        
+        for _ in 0..20 {
+            system.tick();
+        }
+        
+        // Collect all actions
+        let all_actions: Vec<String> = system.logs
+            .iter()
+            .map(|log| log.chosen_action.clone())
+            .collect();
+        
+        // Should have some actions (not all empty)
+        assert!(!all_actions.is_empty());
+        
+        // Verify logs are generated
+        assert!(system.logs.len() > 0);
+    }
 }

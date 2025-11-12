@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_weights_update() {
-        let country = Country::new(1);
+        let _country = Country::new(1);
         let mut weights = AdaptiveWeights::new();
         
         weights.update(200.0, 50.0, 20.0, 0, 0.0);
