@@ -69,6 +69,26 @@ import Counter from '../components/Counter.svelte';
 				background: #dbeafe;
 				color: #3178c6;
 			}
+			.nav-link {
+				display: inline-block;
+				margin-top: 1rem;
+				padding: 0.75rem 1.5rem;
+				background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+				color: white;
+				text-decoration: none;
+				border-radius: 0.5rem;
+				font-weight: 600;
+				font-size: 1.1rem;
+				box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+				transition: all 0.2s;
+			}
+			.nav-link:hover {
+				transform: translateY(-2px);
+				box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+			}
+			.nav-link:active {
+				transform: scale(0.98);
+			}
 		</style>
 	</head>
 	<body>
@@ -83,6 +103,10 @@ import Counter from '../components/Counter.svelte';
 			</div>
 			
 			<Counter client:load />
+			
+			<a href="/simulation" class="nav-link">
+				🚀 View AI Simulation →
+			</a>
 		</main>
 	</body>
 </html>

@@ -1,0 +1,110 @@
+---
+import SimulationTable from '../components/SimulationTable.svelte';
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="description" content="Invasia AI Simulation - Rust/WASM powered simulation" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<title>AI Simulation - Invasia</title>
+		<style>
+			body {
+				font-family: system-ui, sans-serif;
+				margin: 0;
+				padding: 0;
+				min-height: 100vh;
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			}
+			main {
+				padding: 2rem;
+				max-width: 1600px;
+				margin: 0 auto;
+			}
+			.page-header {
+				text-align: center;
+				color: white;
+				margin-bottom: 2rem;
+			}
+			.page-header h1 {
+				margin: 0 0 0.5rem 0;
+				font-size: 2.5rem;
+			}
+			.page-header p {
+				font-size: 1.2rem;
+				margin: 0;
+				opacity: 0.9;
+			}
+			.tech-stack {
+				display: flex;
+				gap: 0.5rem;
+				justify-content: center;
+				flex-wrap: wrap;
+				margin: 1rem 0;
+			}
+			.tech-badge {
+				padding: 0.25rem 0.75rem;
+				border-radius: 1rem;
+				font-size: 0.875rem;
+				font-weight: 600;
+			}
+			.tech-rust {
+				background: #fff3cd;
+				color: #ce422b;
+			}
+			.tech-svelte {
+				background: #ffe4e1;
+				color: #ff3e00;
+			}
+			.tech-wasm {
+				background: #e0e7ff;
+				color: #654ff0;
+			}
+			.tech-ts {
+				background: #dbeafe;
+				color: #3178c6;
+			}
+			.simulation-wrapper {
+				background: white;
+				border-radius: 1rem;
+				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+				padding: 2rem;
+			}
+			.nav-link {
+				display: inline-block;
+				margin-top: 1rem;
+				padding: 0.5rem 1rem;
+				background: rgba(255, 255, 255, 0.2);
+				color: white;
+				text-decoration: none;
+				border-radius: 0.5rem;
+				font-weight: 600;
+				transition: background 0.2s;
+			}
+			.nav-link:hover {
+				background: rgba(255, 255, 255, 0.3);
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<div class="page-header">
+				<h1>AI Simulation</h1>
+				<p>Fully in-browser AI simulation powered by Rust & WebAssembly</p>
+				<div class="tech-stack">
+					<span class="tech-badge tech-rust">🦀 Rust</span>
+					<span class="tech-badge tech-wasm">⚡ WebAssembly</span>
+					<span class="tech-badge tech-svelte">🔥 Svelte</span>
+					<span class="tech-badge tech-ts">📘 TypeScript</span>
+				</div>
+				<a href="/" class="nav-link">← Back to Home</a>
+			</div>
+			
+			<div class="simulation-wrapper">
+				<SimulationTable client:load />
+			</div>
+		</main>
+	</body>
+</html>
