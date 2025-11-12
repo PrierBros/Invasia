@@ -2,6 +2,9 @@
 name = "wasm-counter"
 version = "0.1.0"
 edition = "2021"
+description = "WebAssembly module for Invasia featuring counter logic and AI decision scoring system"
+repository = "https://github.com/JPrier/Invasia"
+license = "Apache-2.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
