@@ -1,0 +1,88 @@
+---
+import Counter from '../components/Counter.svelte';
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="description" content="Invasia - Astro + Svelte + Rust/WASM" />
+		<meta name="viewport" content="width=device-width" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<title>Invasia - Rust + WASM + Svelte</title>
+		<style>
+			body {
+				font-family: system-ui, sans-serif;
+				margin: 0;
+				padding: 0;
+				min-height: 100vh;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			}
+			main {
+				text-align: center;
+				padding: 2rem;
+				background: white;
+				border-radius: 1rem;
+				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+				max-width: 600px;
+				width: 100%;
+			}
+			h1 {
+				color: #333;
+				margin: 0 0 0.5rem 0;
+				font-size: 3rem;
+			}
+			p {
+				color: #666;
+				font-size: 1.2rem;
+				margin-bottom: 1rem;
+			}
+			.tech-stack {
+				display: flex;
+				gap: 0.5rem;
+				justify-content: center;
+				flex-wrap: wrap;
+				margin-bottom: 1rem;
+			}
+			.tech-badge {
+				padding: 0.25rem 0.75rem;
+				border-radius: 1rem;
+				font-size: 0.875rem;
+				font-weight: 600;
+			}
+			.tech-rust {
+				background: #fff3cd;
+				color: #ce422b;
+			}
+			.tech-svelte {
+				background: #ffe4e1;
+				color: #ff3e00;
+			}
+			.tech-wasm {
+				background: #e0e7ff;
+				color: #654ff0;
+			}
+			.tech-ts {
+				background: #dbeafe;
+				color: #3178c6;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Hello World!</h1>
+			<p>Welcome to Invasia - Modern Web Stack</p>
+			<div class="tech-stack">
+				<span class="tech-badge tech-rust">🦀 Rust</span>
+				<span class="tech-badge tech-wasm">⚡ WebAssembly</span>
+				<span class="tech-badge tech-svelte">🔥 Svelte</span>
+				<span class="tech-badge tech-ts">📘 TypeScript</span>
+			</div>
+			
+			<Counter client:load />
+		</main>
+	</body>
+</html>

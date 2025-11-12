@@ -1,0 +1,23 @@
+{
+  "name": "invasia",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "build:wasm": "cd wasm-counter && wasm-pack build --target web --out-dir ../src/wasm",
+    "preview": "astro preview",
+    "astro": "astro",
+    "test:wasm": "cd wasm-counter && cargo test"
+  },
+  "dependencies": {
+    "astro": "^4.16.0",
+    "@astrojs/svelte": "^5.7.2",
+    "svelte": "^4.2.19"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.5",
+    "typescript": "^5.9.3"
+  }
+}
