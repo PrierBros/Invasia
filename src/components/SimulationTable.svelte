@@ -8,11 +8,19 @@
     energy: number;
     position_x: number;
     position_y: number;
-    state: number;
+    state: number | string;
   }
 
   // State names for display
   const stateNames = ['Idle', 'Active', 'Resting', 'Moving'];
+
+  // Helper function to get state name
+  function getStateName(state: number | string): string {
+    if (typeof state === 'string') {
+      return state;
+    }
+    return stateNames[state] || 'Unknown';
+  }
 
   // Simulation control state
   let simulation: any = null;
@@ -292,8 +300,8 @@
             <td>{formatNumber(entity.position_x)}</td>
             <td>{formatNumber(entity.position_y)}</td>
             <td class="state-cell">
-              <span class="state-badge state-{entity.state}">
-                {stateNames[entity.state]}
+              <span class="state-badge state-{typeof entity.state === 'number' ? entity.state : 0}">
+                {getStateName(entity.state)}
               </span>
             </td>
           </tr>

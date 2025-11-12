@@ -60,11 +60,29 @@ impl Counter {
 
 /// AI entity state enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "u32", from = "u32")]
 pub enum AiState {
     Idle = 0,
     Active = 1,
     Resting = 2,
     Moving = 3,
+}
+
+impl From<AiState> for u32 {
+    fn from(state: AiState) -> u32 {
+        state as u32
+    }
+}
+
+impl From<u32> for AiState {
+    fn from(value: u32) -> AiState {
+        match value {
+            1 => AiState::Active,
+            2 => AiState::Resting,
+            3 => AiState::Moving,
+            _ => AiState::Idle,
+        }
+    }
 }
 
 /// AI entity with scalar attributes
