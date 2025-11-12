@@ -114,41 +114,46 @@ impl AiEntity {
         // Deterministic update logic based on tick and entity id
         let seed = (tick.wrapping_mul(1000) + self.id as u64) as f32;
         
-        // Energy dynamics
+        // Create entity-specific variation factors (0.5 to 1.5 range)
+        let id_factor = ((self.id as f32 * 0.1).sin() + 1.0) / 2.0 + 0.5;
+        let tick_factor = ((seed * 0.01).cos() + 1.0) / 2.0 + 0.5;
+        let variation = id_factor * tick_factor;
+        
+        // Energy dynamics with per-entity variation
         match self.state {
             AiState::Active => {
-                self.energy = (self.energy - 0.5).max(0.0);
+                self.energy = (self.energy - 0.5 * variation).max(0.0);
                 if self.energy < 20.0 {
                     self.state = AiState::Resting;
                 }
             }
             AiState::Resting => {
-                self.energy = (self.energy + 1.0).min(100.0);
+                self.energy = (self.energy + 1.0 * variation).min(100.0);
                 if self.energy > 80.0 {
                     self.state = AiState::Moving;
                 }
             }
             AiState::Moving => {
-                self.energy = (self.energy - 0.2).max(0.0);
+                self.energy = (self.energy - 0.2 * variation).max(0.0);
                 // Simple deterministic movement
-                self.position_x += (seed * 0.1).sin() * 2.0;
-                self.position_y += (seed * 0.1).cos() * 2.0;
+                self.position_x += (seed * 0.1).sin() * 2.0 * variation;
+                self.position_y += (seed * 0.1).cos() * 2.0 * variation;
                 
                 if self.energy < 50.0 {
                     self.state = AiState::Active;
                 }
             }
             AiState::Idle => {
-                self.energy = (self.energy + 0.1).min(100.0);
+                self.energy = (self.energy + 0.1 * variation).min(100.0);
                 if self.energy > 90.0 {
                     self.state = AiState::Active;
                 }
             }
         }
 
-        // Health regeneration
+        // Health regeneration with variation
         if self.health < 100.0 {
-            self.health = (self.health + 0.1).min(100.0);
+            self.health = (self.health + 0.1 * variation).min(100.0);
         }
     }
 }

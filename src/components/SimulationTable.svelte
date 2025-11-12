@@ -51,6 +51,9 @@
       simulation = new wasmModule.Simulation(entityCount);
       wasmLoaded = true;
       
+      // Get initial snapshot
+      updateSnapshot();
+      
       // Start render loop (independent of simulation tick rate)
       startRenderLoop();
     } catch (e) {
