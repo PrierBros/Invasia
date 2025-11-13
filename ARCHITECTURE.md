@@ -42,15 +42,16 @@ Invasia demonstrates a cutting-edge web architecture that combines:
 - Efficient DOM updates
 
 **Key Files**:
-- `src/components/Counter.svelte` - Interactive counter component
-- Component uses `<script lang="ts">` for TypeScript
+- `src/components/Counter.svelte` - Reusable counter component (available for future use)
+- `src/components/SimulationTable.svelte` - AI simulation visualization component
+- Components use `<script lang="ts">` for TypeScript
 
 **Data Flow**:
 1. Component mounts (`onMount`)
 2. Dynamically imports WASM module
-3. Initializes Rust Counter instance
+3. Initializes Rust instances (Counter, Simulation, or DecisionSystem)
 4. Manages reactive state
-5. Calls WASM functions on user interaction
+5. Calls WASM functions on user interaction or at regular intervals
 6. Updates UI with Svelte's reactivity
 
 ### 3. Logic Layer (Rust + WebAssembly)
@@ -67,11 +68,13 @@ Invasia demonstrates a cutting-edge web architecture that combines:
 - Type-safe API exposed to JavaScript
 
 **Key Files**:
-- `wasm-counter/src/lib.rs` - Rust implementation
+- `wasm-counter/src/lib.rs` - Rust implementation with Counter, Simulation, and DecisionSystem
+- `wasm-counter/src/decision_scoring/` - AI decision scoring system modules
 - `wasm-counter/Cargo.toml` - Rust project configuration
 
 **API Surface** (exposed via wasm-bindgen):
 ```rust
+// Counter API
 pub struct Counter {
     value: i32,
 }
@@ -84,6 +87,40 @@ impl Counter {
     pub fn get_value(&self) -> i32
     pub fn reset(&mut self)
     pub fn set_value(&mut self, value: i32)
+}
+
+// Simulation API
+pub struct Simulation {
+    entities: Vec<AiEntity>,
+    tick: u64,
+    running: bool,
+}
+
+impl Simulation {
+    pub fn new(entity_count: usize) -> Self
+    pub fn init(entity_count: usize, tick_rate: u32) -> Self
+    pub fn start(&mut self)
+    pub fn pause(&mut self)
+    pub fn resume(&mut self)
+    pub fn reset(&mut self)
+    pub fn step(&mut self)
+    pub fn update(&mut self)
+    pub fn get_snapshot(&self) -> JsValue
+    // ... and more
+}
+
+// DecisionSystem API (AI Decision Scoring)
+pub struct DecisionSystem { /* ... */ }
+
+impl DecisionSystem {
+    pub fn new() -> Self
+    pub fn init(seed: u64) -> Self
+    pub fn add_country(&mut self, id: u32)
+    pub fn add_edge(&mut self, from_id: u32, to_id: u32, distance: usize, hostility: f32)
+    pub fn tick(&mut self)
+    pub fn get_logs(&self) -> JsValue
+    pub fn get_world_snapshot(&self) -> JsValue
+    // ... and more
 }
 ```
 
@@ -137,24 +174,25 @@ impl Counter {
 ### Component Hydration
 
 ```
-1. Counter.svelte onMount hook fires
+1. SimulationTable.svelte onMount hook fires
 2. Dynamic import('../wasm/wasm_counter.js')
 3. WASM module initialization
-4. Counter instance created in WASM memory
+4. Simulation instance created in WASM memory
 5. Component state synchronized
 6. UI ready for interaction
 ```
 
-### User Interaction
+### User Interaction (Simulation)
 
 ```
-1. User clicks "Increment" button
+1. User clicks "Start" button
 2. Svelte event handler fires
-3. Calls counter.increment() (WASM)
-4. Rust executes: self.value.saturating_add(1)
-5. Returns new value to JavaScript
-6. Svelte updates reactive state
-7. DOM updates efficiently
+3. Calls simulation.start() (WASM)
+4. JavaScript interval starts calling simulation.update()
+5. Rust executes entity updates each tick
+6. JavaScript periodically fetches snapshot via get_snapshot()
+7. Svelte updates reactive state with new entity data
+8. DOM updates efficiently with real-time visualization
 ```
 
 ## Performance Characteristics
@@ -177,7 +215,7 @@ impl Counter {
    - Memory safety without garbage collection
 
 4. **Small Bundle Size**
-   - WASM binary is compact (~22KB uncompressed)
+   - WASM binary is compact (~161KB uncompressed for full system)
    - Svelte components compile to minimal JS
    - Tree-shaking removes unused code
 
@@ -280,7 +318,8 @@ Potential improvements to the architecture:
 1. Edit `.svelte` file
 2. Maintain TypeScript typing
 3. Handle WASM async initialization
-4. Test dev and prod builds
+4. Ensure proper cleanup in onDestroy for long-running processes
+5. Test dev and prod builds
 
 ### Testing Strategy
 

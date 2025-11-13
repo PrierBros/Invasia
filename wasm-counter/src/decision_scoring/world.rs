@@ -278,6 +278,12 @@ impl DecisionSystem {
     pub fn clear_logs(&mut self) {
         self.logs.clear();
     }
+    
+    /// Get the RNG seed used for deterministic behavior
+    #[wasm_bindgen]
+    pub fn get_rng_seed(&self) -> u64 {
+        self.rng_seed
+    }
 }
 
 // Non-WASM methods
