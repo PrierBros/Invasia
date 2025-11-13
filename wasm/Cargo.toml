@@ -1,8 +1,8 @@
 [package]
-name = "wasm-counter"
+name = "wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WebAssembly module for Invasia featuring counter logic and AI decision scoring system"
+description = "WebAssembly module for Invasia featuring AI simulation and decision scoring system"
 repository = "https://github.com/JPrier/Invasia"
 license = "Apache-2.0"
 

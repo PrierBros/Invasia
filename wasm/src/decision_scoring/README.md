@@ -76,7 +76,7 @@ Each simulation tick follows six steps:
 ## Usage Example
 
 ```rust
-use wasm_counter::decision_scoring::*;
+use wasm::decision_scoring::*;
 
 // Create system with deterministic seed
 let mut system = DecisionSystem::init(12345);
@@ -142,7 +142,7 @@ cargo test decision_scoring
 The `DecisionSystem` is exposed to JavaScript via `wasm-bindgen`:
 
 ```javascript
-import init, { DecisionSystem } from './wasm/wasm_counter.js';
+import init, { DecisionSystem } from './wasm/wasm.js';
 
 await init();
 

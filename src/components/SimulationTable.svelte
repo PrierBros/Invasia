@@ -44,7 +44,7 @@
   onMount(async () => {
     try {
       // Dynamically import the WASM module
-      const wasmModule = await import('../wasm/wasm_counter.js');
+      const wasmModule = await import('../wasm/wasm.js');
       await wasmModule.default();
       
       // Initialize the simulation
