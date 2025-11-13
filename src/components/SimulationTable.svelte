@@ -5,10 +5,11 @@
   interface AiEntity {
     id: number;
     health: number;
-    energy: number;
+    military_strength: number;
     position_x: number;
     position_y: number;
     state: number | string;
+    territory: number;
   }
 
   // State names for display
@@ -278,7 +279,8 @@
         <tr>
           <th>ID</th>
           <th>Health</th>
-          <th>Energy</th>
+          <th>Military Strength</th>
+          <th>Territory</th>
           <th>Position X</th>
           <th>Position Y</th>
           <th>State</th>
@@ -294,10 +296,16 @@
                 <span class="bar-text">{formatNumber(entity.health)}</span>
               </div>
             </td>
-            <td class="energy-cell">
+            <td class="military-cell">
               <div class="bar-container">
-                <div class="bar bar-energy" style="width: {entity.energy}%"></div>
-                <span class="bar-text">{formatNumber(entity.energy)}</span>
+                <div class="bar bar-military" style="width: {entity.military_strength}%"></div>
+                <span class="bar-text">{formatNumber(entity.military_strength)}</span>
+              </div>
+            </td>
+            <td class="territory-cell">
+              <div class="bar-container">
+                <div class="bar bar-territory" style="width: {entity.territory}%"></div>
+                <span class="bar-text">{formatNumber(entity.territory)}</span>
               </div>
             </td>
             <td>{formatNumber(entity.position_x)}</td>
@@ -529,8 +537,12 @@
     background: linear-gradient(90deg, #ef4444 0%, #10b981 100%);
   }
 
-  .bar-energy {
-    background: linear-gradient(90deg, #f59e0b 0%, #3b82f6 100%);
+  .bar-military {
+    background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
+  }
+
+  .bar-territory {
+    background: linear-gradient(90deg, #eab308 0%, #22c55e 100%);
   }
 
   .bar-text {
