@@ -41,10 +41,11 @@ impl From<u32> for AiState {
 pub struct AiEntity {
     pub id: u32,
     pub health: f32,
-    pub energy: f32,
+    pub military_strength: f32,
     pub position_x: f32,
     pub position_y: f32,
     pub state: AiState,
+    pub territory: f32,  // Territory controlled by this entity
 }
 
 impl AiEntity {
@@ -55,8 +56,8 @@ impl AiEntity {
         let id_seed = id as f32;
         let variation = ((id_seed * 0.7321).sin() + 1.0) / 2.0; // 0.0 to 1.0 range
         
-        // Vary initial energy between 50 and 100
-        let initial_energy = 50.0 + (variation * 50.0);
+        // Vary initial military strength between 50 and 100
+        let initial_military_strength = 50.0 + (variation * 50.0);
         
         // Vary initial health between 70 and 100  
         let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
@@ -77,15 +78,16 @@ impl AiEntity {
         Self {
             id,
             health: initial_health,
-            energy: initial_energy,
+            military_strength: initial_military_strength,
             position_x: 0.0,
             position_y: 0.0,
             state: initial_state,
+            territory: 10.0,  // Start with small territory
         }
     }
 
     /// Update the entity for one simulation tick
-    pub fn update(&mut self, tick: u64) {
+    pub fn update(&mut self, tick: u64, all_entities: &[AiEntity]) {
         // Deterministic update logic based on tick and entity id
         // Use a better pseudo-random variation that's unique per entity
         let seed1 = (tick.wrapping_mul(1000) + self.id as u64) as f32;
@@ -97,41 +99,76 @@ impl AiEntity {
         let tick_factor = ((seed2 * 0.00123).cos() + 1.0) / 2.0 + 0.5;
         let variation = id_factor * tick_factor;
         
-        // Energy dynamics with per-entity variation
+        // Military strength dynamics with per-entity variation
         match self.state {
             AiState::Active => {
-                self.energy = (self.energy - 0.5 * variation).max(0.0);
-                if self.energy < 20.0 {
+                // Active state: Attack nearby entities
+                self.military_strength = (self.military_strength - 0.3 * variation).max(0.0);
+                
+                // Entities in Active state deal damage to nearby entities
+                // (damage is calculated and applied in the combat damage section below)
+                
+                if self.military_strength < 20.0 {
                     self.state = AiState::Resting;
                 }
             }
             AiState::Resting => {
-                self.energy = (self.energy + 1.0 * variation).min(100.0);
-                if self.energy > 80.0 {
+                // Resting state: Rebuild military strength
+                self.military_strength = (self.military_strength + 1.0 * variation).min(100.0);
+                if self.military_strength > 80.0 {
                     self.state = AiState::Moving;
                 }
             }
             AiState::Moving => {
-                self.energy = (self.energy - 0.2 * variation).max(0.0);
+                // Moving state: Attempt expansion
+                self.military_strength = (self.military_strength - 0.2 * variation).max(0.0);
+                
                 // Simple deterministic movement
                 self.position_x += (seed1 * 0.1).sin() * 2.0 * variation;
                 self.position_y += (seed1 * 0.1).cos() * 2.0 * variation;
                 
-                if self.energy < 50.0 {
+                // Expansion: Gain territory if military strength is sufficient
+                if self.military_strength > 60.0 {
+                    let expansion_rate = (self.military_strength / 100.0) * 0.1 * variation;
+                    self.territory = (self.territory + expansion_rate).min(100.0);
+                }
+                
+                if self.military_strength < 50.0 {
                     self.state = AiState::Active;
                 }
             }
             AiState::Idle => {
-                self.energy = (self.energy + 0.1 * variation).min(100.0);
-                if self.energy > 90.0 {
+                self.military_strength = (self.military_strength + 0.1 * variation).min(100.0);
+                if self.military_strength > 90.0 {
                     self.state = AiState::Active;
                 }
             }
         }
 
-        // Health regeneration with variation
-        if self.health < 100.0 {
-            self.health = (self.health + 0.1 * variation).min(100.0);
+        // Apply combat damage from nearby Active entities
+        let mut total_damage = 0.0;
+        for other in all_entities {
+            if other.id != self.id && other.state == AiState::Active {
+                let dx = self.position_x - other.position_x;
+                let dy = self.position_y - other.position_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                
+                // Take damage from nearby attackers
+                if distance < 10.0 && distance > 0.1 {
+                    let damage = (other.military_strength / 100.0) * 0.5 * variation;
+                    total_damage += damage;
+                }
+            }
+        }
+        
+        // Apply damage to health
+        if total_damage > 0.0 {
+            self.health = (self.health - total_damage).max(0.0);
+        }
+
+        // Health regeneration with variation (slower than before, and not during combat)
+        if self.health < 100.0 && total_damage == 0.0 {
+            self.health = (self.health + 0.05 * variation).min(100.0);
         }
     }
 }
@@ -206,8 +243,13 @@ impl Simulation {
     #[wasm_bindgen]
     pub fn step(&mut self) {
         self.tick = self.tick.wrapping_add(1);
+        
+        // Clone entities for reading during updates
+        let entities_snapshot = self.entities.clone();
+        
+        // Update each entity with access to all entities for combat
         for entity in &mut self.entities {
-            entity.update(self.tick);
+            entity.update(self.tick, &entities_snapshot);
         }
     }
 
@@ -281,19 +323,21 @@ mod tests {
         assert_eq!(entity.id, 0);
         // Initial values now have variation
         assert!(entity.health >= 70.0 && entity.health <= 100.0);
-        assert!(entity.energy >= 50.0 && entity.energy <= 100.0);
+        assert!(entity.military_strength >= 50.0 && entity.military_strength <= 100.0);
         assert_eq!(entity.position_x, 0.0);
         assert_eq!(entity.position_y, 0.0);
+        assert_eq!(entity.territory, 10.0);
         // State is now varied per entity
     }
 
     #[test]
     fn test_ai_entity_update() {
         let mut entity = AiEntity::new(0);
-        entity.update(1);
-        // Energy should change after update (may increase or decrease depending on state)
+        let entities = vec![entity.clone()];
+        entity.update(1, &entities);
+        // Military strength should change after update (may increase or decrease depending on state)
         // Just verify the update doesn't crash
-        assert!(entity.energy >= 0.0 && entity.energy <= 100.0);
+        assert!(entity.military_strength >= 0.0 && entity.military_strength <= 100.0);
     }
 
     #[test]
@@ -356,32 +400,96 @@ mod tests {
 
     #[test]
     fn test_entity_energy_variation() {
-        // Create multiple entities and verify they have different energy levels after updates
+        // Create multiple entities and verify they have different military strength levels after updates
         let mut entities = Vec::new();
         for i in 0..10 {
             entities.push(AiEntity::new(i));
         }
         
+        // Clone for read access during updates
+        let entities_snapshot = entities.clone();
+        
         // Update all entities for the same tick
         for entity in &mut entities {
-            entity.update(1);
+            entity.update(1, &entities_snapshot);
         }
         
-        // Print energy values for debugging
+        // Print military strength values for debugging
         for entity in &entities {
-            println!("Entity {}: energy = {}", entity.id, entity.energy);
+            println!("Entity {}: military_strength = {}", entity.id, entity.military_strength);
         }
         
-        // Check that not all entities have the exact same energy level
-        let first_energy = entities[0].energy;
-        let all_same = entities.iter().all(|e| (e.energy - first_energy).abs() < 0.001);
+        // Check that not all entities have the exact same military strength level
+        let first_military_strength = entities[0].military_strength;
+        let all_same = entities.iter().all(|e| (e.military_strength - first_military_strength).abs() < 0.001);
         
-        assert!(!all_same, "All entities should not have the exact same energy level after update");
+        assert!(!all_same, "All entities should not have the exact same military strength level after update");
         
         // Verify that we have at least some variation
-        let max_energy = entities.iter().map(|e| e.energy).fold(f32::NEG_INFINITY, f32::max);
-        let min_energy = entities.iter().map(|e| e.energy).fold(f32::INFINITY, f32::min);
+        let max_military_strength = entities.iter().map(|e| e.military_strength).fold(f32::NEG_INFINITY, f32::max);
+        let min_military_strength = entities.iter().map(|e| e.military_strength).fold(f32::INFINITY, f32::min);
         
-        assert!(max_energy - min_energy > 0.0, "Entities should have varying energy levels");
+        assert!(max_military_strength - min_military_strength > 0.0, "Entities should have varying military strength levels");
+    }
+
+    #[test]
+    fn test_combat_reduces_health() {
+        // Create two entities near each other
+        let mut entity1 = AiEntity::new(0);
+        let mut entity2 = AiEntity::new(1);
+        
+        // Position them close to each other
+        entity1.position_x = 0.0;
+        entity1.position_y = 0.0;
+        entity2.position_x = 5.0;
+        entity2.position_y = 0.0;
+        
+        // Set entity2 to Active state with high military strength
+        entity2.state = AiState::Active;
+        entity2.military_strength = 100.0;
+        
+        let initial_health = entity1.health;
+        
+        // Update entity1 with entity2 nearby and attacking
+        let entities = vec![entity1.clone(), entity2.clone()];
+        entity1.update(1, &entities);
+        
+        // Health should have decreased due to being attacked
+        assert!(entity1.health < initial_health, "Health should decrease when attacked");
+    }
+
+    #[test]
+    fn test_expansion_increases_territory() {
+        // Create entity in Moving state with high military strength
+        let mut entity = AiEntity::new(0);
+        entity.state = AiState::Moving;
+        entity.military_strength = 80.0;
+        entity.territory = 20.0;
+        
+        let initial_territory = entity.territory;
+        
+        // Update entity (alone, no combat)
+        let entities = vec![entity.clone()];
+        entity.update(1, &entities);
+        
+        // Territory should have increased
+        assert!(entity.territory >= initial_territory, "Territory should increase when in Moving state with high military strength");
+    }
+
+    #[test]
+    fn test_health_regeneration_only_when_safe() {
+        // Create entity with low health, no nearby attackers
+        let mut entity = AiEntity::new(0);
+        entity.health = 50.0;
+        entity.state = AiState::Resting;
+        
+        let initial_health = entity.health;
+        
+        // Update with no nearby entities
+        let entities = vec![entity.clone()];
+        entity.update(1, &entities);
+        
+        // Health should regenerate when safe
+        assert!(entity.health >= initial_health, "Health should regenerate when not under attack");
     }
 }
