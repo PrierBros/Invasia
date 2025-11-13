@@ -42,14 +42,13 @@ Invasia demonstrates a cutting-edge web architecture that combines:
 - Efficient DOM updates
 
 **Key Files**:
-- `src/components/Counter.svelte` - Reusable counter component (available for future use)
 - `src/components/SimulationTable.svelte` - AI simulation visualization component
 - Components use `<script lang="ts">` for TypeScript
 
 **Data Flow**:
 1. Component mounts (`onMount`)
 2. Dynamically imports WASM module
-3. Initializes Rust instances (Counter, Simulation, or DecisionSystem)
+3. Initializes Rust instances (Simulation or DecisionSystem)
 4. Manages reactive state
 5. Calls WASM functions on user interaction or at regular intervals
 6. Updates UI with Svelte's reactivity
@@ -61,34 +60,19 @@ Invasia demonstrates a cutting-edge web architecture that combines:
 **Technology**: Rust 1.70+ with wasm-bindgen
 
 **Responsibilities**:
-- Counter state management
+- AI simulation state management
 - Business logic implementation
 - Memory-safe operations
 - Near-native performance
 - Type-safe API exposed to JavaScript
 
 **Key Files**:
-- `wasm-counter/src/lib.rs` - Rust implementation with Counter, Simulation, and DecisionSystem
-- `wasm-counter/src/decision_scoring/` - AI decision scoring system modules
-- `wasm-counter/Cargo.toml` - Rust project configuration
+- `wasm/src/lib.rs` - Rust implementation with Simulation and DecisionSystem
+- `wasm/src/decision_scoring/` - AI decision scoring system modules
+- `wasm/Cargo.toml` - Rust project configuration
 
 **API Surface** (exposed via wasm-bindgen):
 ```rust
-// Counter API
-pub struct Counter {
-    value: i32,
-}
-
-impl Counter {
-    pub fn new() -> Counter
-    pub fn with_value(initial: i32) -> Counter
-    pub fn increment(&mut self) -> i32
-    pub fn decrement(&mut self) -> i32
-    pub fn get_value(&self) -> i32
-    pub fn reset(&mut self)
-    pub fn set_value(&mut self, value: i32)
-}
-
 // Simulation API
 pub struct Simulation {
     entities: Vec<AiEntity>,
@@ -175,7 +159,7 @@ impl DecisionSystem {
 
 ```
 1. SimulationTable.svelte onMount hook fires
-2. Dynamic import('../wasm/wasm_counter.js')
+2. Dynamic import('../wasm/wasm.js')
 3. WASM module initialization
 4. Simulation instance created in WASM memory
 5. Component state synchronized
@@ -308,7 +292,7 @@ Potential improvements to the architecture:
 
 ### Adding New WASM Functions
 
-1. Add function to `wasm-counter/src/lib.rs`
+1. Add function to `wasm/src/lib.rs`
 2. Mark with `#[wasm_bindgen]` attribute
 3. Rebuild: `npm run build:wasm`
 4. Use in Svelte component

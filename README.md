@@ -89,7 +89,7 @@ npm run preview
 npm run test:wasm
 
 # Or directly with cargo
-cd wasm-counter && cargo test
+cd wasm && cargo test
 ```
 
 ## 📦 Project Structure
@@ -100,18 +100,17 @@ cd wasm-counter && cargo test
 │   └── favicon.svg          # Site favicon
 ├── src/
 │   ├── components/
-│   │   ├── Counter.svelte   # Reusable counter component (TypeScript)
 │   │   └── SimulationTable.svelte  # AI simulation visualization component
 │   ├── pages/
 │   │   ├── index.astro      # Landing page
 │   │   └── simulation.astro # AI simulation page
 │   └── wasm/                # Generated WASM files (excluded from git)
-│       ├── wasm_counter.js
-│       ├── wasm_counter_bg.wasm
+│       ├── wasm.js
+│       ├── wasm_bg.wasm
 │       └── ...
-├── wasm-counter/            # Rust/WASM source
+├── wasm/                    # Rust/WASM source
 │   ├── src/
-│   │   ├── lib.rs           # Counter logic and AI simulation in Rust
+│   │   ├── lib.rs           # AI simulation in Rust
 │   │   └── decision_scoring/ # AI Decision Scoring System
 │   │       ├── mod.rs       # Module definitions
 │   │       ├── luts.rs      # Lookup tables (sigmoid, log-ratio, etc.)
@@ -134,15 +133,13 @@ cd wasm-counter && cargo test
 
 ### Data Flow
 
-1. **Rust/WASM Module** (`wasm-counter/src/lib.rs`)
-   - Implements `Counter` struct with increment/decrement/reset logic
+1. **Rust/WASM Module** (`wasm/src/lib.rs`)
    - Implements `Simulation` struct for AI entity simulation
    - Implements `DecisionSystem` for advanced AI decision scoring
    - Compiled to WebAssembly for near-native performance
    - Manages memory safely using Rust's ownership system
 
 2. **Svelte Components** (`src/components/`)
-   - `Counter.svelte` - Reusable counter component (available for future use)
    - `SimulationTable.svelte` - Real-time AI simulation visualization
    - Loads WASM module asynchronously on mount
    - Manages UI state reactively with TypeScript

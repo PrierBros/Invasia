@@ -6,10 +6,10 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
-    "build:wasm": "cd wasm-counter && wasm-pack build --target web --out-dir ../src/wasm",
+    "build:wasm": "cd wasm && wasm-pack build --target web --out-dir ../src/wasm",
     "preview": "astro preview",
     "astro": "astro",
-    "test:wasm": "cd wasm-counter && cargo test"
+    "test:wasm": "cd wasm && cargo test"
   },
   "dependencies": {
     "astro": "^4.16.0",
