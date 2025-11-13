@@ -1,5 +1,6 @@
-use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use wasm_bindgen::prelude::*;
 
 // AI Decision Scoring System modules
 mod decision_scoring;
@@ -45,7 +46,7 @@ pub struct AiEntity {
     pub position_x: f32,
     pub position_y: f32,
     pub state: AiState,
-    pub territory: f32,  // Territory controlled by this entity
+    pub territory: f32, // Territory controlled by this entity
 }
 
 impl AiEntity {
@@ -55,14 +56,14 @@ impl AiEntity {
         // Use id as seed for deterministic but varied initialization
         let id_seed = id as f32;
         let variation = ((id_seed * 0.7321).sin() + 1.0) / 2.0; // 0.0 to 1.0 range
-        
+
         // Vary initial military strength between 50 and 100
         let initial_military_strength = 50.0 + (variation * 50.0);
-        
-        // Vary initial health between 70 and 100  
+
+        // Vary initial health between 70 and 100
         let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
         let initial_health = 70.0 + (health_variation * 30.0);
-        
+
         // Randomize initial state based on id
         let state_seed = ((id_seed * 2.718).sin() + 1.0) / 2.0;
         let initial_state = if state_seed < 0.25 {
@@ -74,7 +75,7 @@ impl AiEntity {
         } else {
             AiState::Moving
         };
-        
+
         Self {
             id,
             health: initial_health,
@@ -82,32 +83,37 @@ impl AiEntity {
             position_x: 0.0,
             position_y: 0.0,
             state: initial_state,
-            territory: 10.0,  // Start with small territory
+            territory: 10.0, // Start with small territory
         }
     }
 
     /// Update the entity for one simulation tick
-    pub fn update(&mut self, tick: u64, all_entities: &[AiEntity]) {
+    pub(crate) fn update(
+        &mut self,
+        tick: u64,
+        entity_snapshots: &[EntitySnapshot],
+        neighbor_indices: &[usize],
+    ) {
         // Deterministic update logic based on tick and entity id
         // Use a better pseudo-random variation that's unique per entity
         let seed1 = (tick.wrapping_mul(1000) + self.id as u64) as f32;
         let seed2 = (tick.wrapping_mul(7919) + self.id.wrapping_mul(6547) as u64) as f32;
-        
+
         // Create entity-specific variation factors (0.5 to 1.5 range)
         // Use different multipliers for better spread
         let id_factor = ((self.id as f32 * 0.7321).sin() + 1.0) / 2.0 + 0.5;
         let tick_factor = ((seed2 * 0.00123).cos() + 1.0) / 2.0 + 0.5;
         let variation = id_factor * tick_factor;
-        
+
         // Military strength dynamics with per-entity variation
         match self.state {
             AiState::Active => {
                 // Active state: Attack nearby entities
                 self.military_strength = (self.military_strength - 0.3 * variation).max(0.0);
-                
+
                 // Entities in Active state deal damage to nearby entities
                 // (damage is calculated and applied in the combat damage section below)
-                
+
                 if self.military_strength < 20.0 {
                     self.state = AiState::Resting;
                 }
@@ -122,17 +128,17 @@ impl AiEntity {
             AiState::Moving => {
                 // Moving state: Attempt expansion
                 self.military_strength = (self.military_strength - 0.2 * variation).max(0.0);
-                
+
                 // Simple deterministic movement
                 self.position_x += (seed1 * 0.1).sin() * 2.0 * variation;
                 self.position_y += (seed1 * 0.1).cos() * 2.0 * variation;
-                
+
                 // Expansion: Gain territory if military strength is sufficient
                 if self.military_strength > 60.0 {
                     let expansion_rate = (self.military_strength / 100.0) * 0.1 * variation;
                     self.territory = (self.territory + expansion_rate).min(100.0);
                 }
-                
+
                 if self.military_strength < 50.0 {
                     self.state = AiState::Active;
                 }
@@ -147,12 +153,13 @@ impl AiEntity {
 
         // Apply combat damage from nearby Active entities
         let mut total_damage = 0.0;
-        for other in all_entities {
+        for &other_index in neighbor_indices {
+            let other = &entity_snapshots[other_index];
             if other.id != self.id && other.state == AiState::Active {
                 let dx = self.position_x - other.position_x;
                 let dy = self.position_y - other.position_y;
                 let distance = (dx * dx + dy * dy).sqrt();
-                
+
                 // Take damage from nearby attackers
                 if distance < 10.0 && distance > 0.1 {
                     let damage = (other.military_strength / 100.0) * 0.5 * variation;
@@ -160,7 +167,7 @@ impl AiEntity {
                 }
             }
         }
-        
+
         // Apply damage to health
         if total_damage > 0.0 {
             self.health = (self.health - total_damage).max(0.0);
@@ -173,6 +180,73 @@ impl AiEntity {
     }
 }
 
+#[derive(Clone, Copy)]
+struct EntitySnapshot {
+    id: u32,
+    position_x: f32,
+    position_y: f32,
+    state: AiState,
+    military_strength: f32,
+}
+
+impl From<&AiEntity> for EntitySnapshot {
+    fn from(entity: &AiEntity) -> Self {
+        Self {
+            id: entity.id,
+            position_x: entity.position_x,
+            position_y: entity.position_y,
+            state: entity.state,
+            military_strength: entity.military_strength,
+        }
+    }
+}
+
+struct SpatialGrid {
+    cell_size: f32,
+    search_radius: f32,
+    cells: HashMap<(i32, i32), Vec<usize>>,
+}
+
+impl SpatialGrid {
+    fn new(cell_size: f32, search_radius: f32) -> Self {
+        Self {
+            cell_size,
+            search_radius,
+            cells: HashMap::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.cells.clear();
+    }
+
+    fn cell_coords(&self, x: f32, y: f32) -> (i32, i32) {
+        let cx = (x / self.cell_size).floor() as i32;
+        let cy = (y / self.cell_size).floor() as i32;
+        (cx, cy)
+    }
+
+    fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
+        self.clear();
+        for (index, entity) in snapshots.iter().enumerate() {
+            let coords = self.cell_coords(entity.position_x, entity.position_y);
+            self.cells.entry(coords).or_default().push(index);
+        }
+    }
+
+    fn query_neighbors(&self, x: f32, y: f32, buffer: &mut Vec<usize>) {
+        let (cx, cy) = self.cell_coords(x, y);
+        let range = (self.search_radius / self.cell_size).ceil() as i32;
+        for dx in -range..=range {
+            for dy in -range..=range {
+                if let Some(indices) = self.cells.get(&(cx + dx, cy + dy)) {
+                    buffer.extend(indices.iter().copied());
+                }
+            }
+        }
+    }
+}
+
 /// Simulation state manager
 #[wasm_bindgen]
 pub struct Simulation {
@@ -181,6 +255,7 @@ pub struct Simulation {
     running: bool,
     entity_count: usize,
     tick_rate: u32,
+    grid: SpatialGrid,
 }
 
 #[wasm_bindgen]
@@ -199,6 +274,7 @@ impl Simulation {
             running: false,
             entity_count,
             tick_rate: 60, // Default 60 ticks per second
+            grid: SpatialGrid::new(5.0, 10.0),
         }
     }
 
@@ -234,6 +310,7 @@ impl Simulation {
         self.tick = 0;
         self.running = false;
         self.entities.clear();
+        self.grid.clear();
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
@@ -243,13 +320,25 @@ impl Simulation {
     #[wasm_bindgen]
     pub fn step(&mut self) {
         self.tick = self.tick.wrapping_add(1);
-        
-        // Clone entities for reading during updates
-        let entities_snapshot = self.entities.clone();
-        
-        // Update each entity with access to all entities for combat
-        for entity in &mut self.entities {
-            entity.update(self.tick, &entities_snapshot);
+
+        let snapshots: Vec<EntitySnapshot> =
+            self.entities.iter().map(EntitySnapshot::from).collect();
+
+        self.grid.rebuild(&snapshots);
+
+        let mut neighbor_indices = Vec::new();
+        for i in 0..self.entities.len() {
+            neighbor_indices.clear();
+            let entity_snapshot = snapshots[i];
+            self.grid.query_neighbors(
+                entity_snapshot.position_x,
+                entity_snapshot.position_y,
+                &mut neighbor_indices,
+            );
+            neighbor_indices.retain(|&index| index != i);
+
+            let entity = &mut self.entities[i];
+            entity.update(self.tick, &snapshots, &neighbor_indices);
         }
     }
 
@@ -310,6 +399,7 @@ impl Simulation {
         self.running = false;
         self.entities.clear();
         self.tick = 0;
+        self.grid.clear();
     }
 }
 
@@ -333,8 +423,8 @@ mod tests {
     #[test]
     fn test_ai_entity_update() {
         let mut entity = AiEntity::new(0);
-        let entities = vec![entity.clone()];
-        entity.update(1, &entities);
+        let snapshots = vec![EntitySnapshot::from(&entity)];
+        entity.update(1, &snapshots, &[]);
         // Military strength should change after update (may increase or decrease depending on state)
         // Just verify the update doesn't crash
         assert!(entity.military_strength >= 0.0 && entity.military_strength <= 100.0);
@@ -352,13 +442,13 @@ mod tests {
     fn test_simulation_start_pause() {
         let mut sim = Simulation::new(5);
         assert!(!sim.is_running());
-        
+
         sim.start();
         assert!(sim.is_running());
-        
+
         sim.pause();
         assert!(!sim.is_running());
-        
+
         sim.resume();
         assert!(sim.is_running());
     }
@@ -367,10 +457,10 @@ mod tests {
     fn test_simulation_step() {
         let mut sim = Simulation::new(5);
         assert_eq!(sim.get_tick(), 0);
-        
+
         sim.step();
         assert_eq!(sim.get_tick(), 1);
-        
+
         sim.step();
         assert_eq!(sim.get_tick(), 2);
     }
@@ -382,7 +472,7 @@ mod tests {
         sim.step();
         sim.step();
         assert_eq!(sim.get_tick(), 2);
-        
+
         sim.reset();
         assert_eq!(sim.get_tick(), 0);
         assert!(!sim.is_running());
@@ -393,7 +483,7 @@ mod tests {
     fn test_simulation_tick_rate() {
         let mut sim = Simulation::new(5);
         assert_eq!(sim.get_tick_rate(), 60);
-        
+
         sim.set_tick_rate(30);
         assert_eq!(sim.get_tick_rate(), 30);
     }
@@ -405,31 +495,57 @@ mod tests {
         for i in 0..10 {
             entities.push(AiEntity::new(i));
         }
-        
-        // Clone for read access during updates
-        let entities_snapshot = entities.clone();
-        
-        // Update all entities for the same tick
-        for entity in &mut entities {
-            entity.update(1, &entities_snapshot);
+
+        let snapshots: Vec<EntitySnapshot> = entities.iter().map(EntitySnapshot::from).collect();
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        let mut neighbors = Vec::new();
+
+        // Update all entities for the same tick using spatial grid neighbors
+        for i in 0..entities.len() {
+            neighbors.clear();
+            grid.query_neighbors(
+                snapshots[i].position_x,
+                snapshots[i].position_y,
+                &mut neighbors,
+            );
+            neighbors.retain(|&idx| idx != i);
+            entities[i].update(1, &snapshots, &neighbors);
         }
-        
+
         // Print military strength values for debugging
         for entity in &entities {
-            println!("Entity {}: military_strength = {}", entity.id, entity.military_strength);
+            println!(
+                "Entity {}: military_strength = {}",
+                entity.id, entity.military_strength
+            );
         }
-        
+
         // Check that not all entities have the exact same military strength level
         let first_military_strength = entities[0].military_strength;
-        let all_same = entities.iter().all(|e| (e.military_strength - first_military_strength).abs() < 0.001);
-        
-        assert!(!all_same, "All entities should not have the exact same military strength level after update");
-        
+        let all_same = entities
+            .iter()
+            .all(|e| (e.military_strength - first_military_strength).abs() < 0.001);
+
+        assert!(
+            !all_same,
+            "All entities should not have the exact same military strength level after update"
+        );
+
         // Verify that we have at least some variation
-        let max_military_strength = entities.iter().map(|e| e.military_strength).fold(f32::NEG_INFINITY, f32::max);
-        let min_military_strength = entities.iter().map(|e| e.military_strength).fold(f32::INFINITY, f32::min);
-        
-        assert!(max_military_strength - min_military_strength > 0.0, "Entities should have varying military strength levels");
+        let max_military_strength = entities
+            .iter()
+            .map(|e| e.military_strength)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_military_strength = entities
+            .iter()
+            .map(|e| e.military_strength)
+            .fold(f32::INFINITY, f32::min);
+
+        assert!(
+            max_military_strength - min_military_strength > 0.0,
+            "Entities should have varying military strength levels"
+        );
     }
 
     #[test]
@@ -437,25 +553,40 @@ mod tests {
         // Create two entities near each other
         let mut entity1 = AiEntity::new(0);
         let mut entity2 = AiEntity::new(1);
-        
+
         // Position them close to each other
         entity1.position_x = 0.0;
         entity1.position_y = 0.0;
         entity2.position_x = 5.0;
         entity2.position_y = 0.0;
-        
+
         // Set entity2 to Active state with high military strength
         entity2.state = AiState::Active;
         entity2.military_strength = 100.0;
-        
+
         let initial_health = entity1.health;
-        
+
         // Update entity1 with entity2 nearby and attacking
-        let entities = vec![entity1.clone(), entity2.clone()];
-        entity1.update(1, &entities);
-        
+        let snapshots = vec![
+            EntitySnapshot::from(&entity1),
+            EntitySnapshot::from(&entity2),
+        ];
+        let mut neighbors = Vec::new();
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        grid.query_neighbors(
+            snapshots[0].position_x,
+            snapshots[0].position_y,
+            &mut neighbors,
+        );
+        neighbors.retain(|&idx| idx != 0);
+        entity1.update(1, &snapshots, &neighbors);
+
         // Health should have decreased due to being attacked
-        assert!(entity1.health < initial_health, "Health should decrease when attacked");
+        assert!(
+            entity1.health < initial_health,
+            "Health should decrease when attacked"
+        );
     }
 
     #[test]
@@ -465,15 +596,18 @@ mod tests {
         entity.state = AiState::Moving;
         entity.military_strength = 80.0;
         entity.territory = 20.0;
-        
+
         let initial_territory = entity.territory;
-        
+
         // Update entity (alone, no combat)
-        let entities = vec![entity.clone()];
-        entity.update(1, &entities);
-        
+        let snapshots = vec![EntitySnapshot::from(&entity)];
+        entity.update(1, &snapshots, &[]);
+
         // Territory should have increased
-        assert!(entity.territory >= initial_territory, "Territory should increase when in Moving state with high military strength");
+        assert!(
+            entity.territory >= initial_territory,
+            "Territory should increase when in Moving state with high military strength"
+        );
     }
 
     #[test]
@@ -482,14 +616,52 @@ mod tests {
         let mut entity = AiEntity::new(0);
         entity.health = 50.0;
         entity.state = AiState::Resting;
-        
+
         let initial_health = entity.health;
-        
+
         // Update with no nearby entities
-        let entities = vec![entity.clone()];
-        entity.update(1, &entities);
-        
+        let snapshots = vec![EntitySnapshot::from(&entity)];
+        entity.update(1, &snapshots, &[]);
+
         // Health should regenerate when safe
-        assert!(entity.health >= initial_health, "Health should regenerate when not under attack");
+        assert!(
+            entity.health >= initial_health,
+            "Health should regenerate when not under attack"
+        );
+    }
+
+    #[test]
+    #[ignore = "Performance benchmark"]
+    fn test_simulation_step_scaling_is_reasonable() {
+        use std::time::Instant;
+
+        fn measure(entity_count: usize) -> std::time::Duration {
+            let mut sim = Simulation::new(entity_count);
+            for _ in 0..5 {
+                sim.step();
+            }
+            let start = Instant::now();
+            for _ in 0..30 {
+                sim.step();
+            }
+            start.elapsed()
+        }
+
+        let dur_1k = measure(1_000);
+        let dur_2k = measure(2_000);
+        let ratio = dur_2k.as_secs_f64() / dur_1k.as_secs_f64().max(1e-9);
+
+        println!(
+            "Simulation benchmark: 1000 -> {:?}, 2000 -> {:?}, ratio {:.2}",
+            dur_1k, dur_2k, ratio
+        );
+
+        assert!(
+            ratio < 4.0,
+            "Simulation step scaling ratio too high: {:.2} (1k: {:?}, 2k: {:?})",
+            ratio,
+            dur_1k,
+            dur_2k
+        );
     }
 }
