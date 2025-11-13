@@ -10,10 +10,11 @@
     position_y: number;
     state: number | string;
     territory: number;
+    money: number;
   }
 
   // State names for display
-  const stateNames = ['Idle', 'Active', 'Resting', 'Moving'];
+  const stateNames = ['Idle', 'Active', 'Resting', 'Moving', 'Dead'];
 
   // Helper function to get state name
   function getStateName(state: number | string): string {
@@ -280,6 +281,7 @@
           <th>ID</th>
           <th>Health</th>
           <th>Military Strength</th>
+          <th>Money</th>
           <th>Territory</th>
           <th>Position X</th>
           <th>Position Y</th>
@@ -300,6 +302,12 @@
               <div class="bar-container">
                 <div class="bar bar-military" style="width: {entity.military_strength}%"></div>
                 <span class="bar-text">{formatNumber(entity.military_strength)}</span>
+              </div>
+            </td>
+            <td class="money-cell">
+              <div class="bar-container">
+                <div class="bar bar-money" style="width: {Math.min(entity.money / 2, 100)}%"></div>
+                <span class="bar-text">{formatNumber(entity.money)}</span>
               </div>
             </td>
             <td class="territory-cell">
@@ -545,6 +553,10 @@
     background: linear-gradient(90deg, #eab308 0%, #22c55e 100%);
   }
 
+  .bar-money {
+    background: linear-gradient(90deg, #f59e0b 0%, #10b981 100%);
+  }
+
   .bar-text {
     position: absolute;
     top: 50%;
@@ -584,6 +596,11 @@
   .state-3 {
     background: #d1fae5;
     color: #065f46;
+  }
+
+  .state-4 {
+    background: #fee2e2;
+    color: #991b1b;
   }
 
   @media (max-width: 768px) {
