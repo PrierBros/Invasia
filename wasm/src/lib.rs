@@ -53,6 +53,8 @@ pub struct AiEntity {
 
 impl AiEntity {
     /// Create a new AI entity with default values
+    /// Grid size is 256x256 cells with cell_size=5.0, so world is [-640, 640)
+    /// Entities spawn distributed across the grid to avoid clustering
     pub fn new(id: u32) -> Self {
         // Create per-entity variation for initial state
         // Use id as seed for deterministic but varied initialization
@@ -82,12 +84,22 @@ impl AiEntity {
             AiState::Moving
         };
 
+        // Deterministic random spawn position across the grid
+        // Grid world bounds are [-640, 640) to stay within 256x256 cells at cell_size=5.0
+        // Use multiple sine waves with different frequencies for good distribution
+        let x_seed = ((id_seed * 0.3371).sin() + (id_seed * 0.0157).sin()) * 0.5;
+        let y_seed = ((id_seed * 0.4219).cos() + (id_seed * 0.0213).cos()) * 0.5;
+        
+        // Spawn within world bounds, leaving margin to prevent immediate edge cases
+        let spawn_x = x_seed * 600.0; // Range: [-600, 600]
+        let spawn_y = y_seed * 600.0; // Range: [-600, 600]
+
         Self {
             id,
             health: initial_health,
             military_strength: initial_military_strength,
-            position_x: 0.0,
-            position_y: 0.0,
+            position_x: spawn_x,
+            position_y: spawn_y,
             state: initial_state,
             territory: 10.0,  // Start with small territory
             money: initial_money,
@@ -132,9 +144,18 @@ impl AiEntity {
             AiState::Moving => {
                 self.military_strength = (self.military_strength - 0.2 * variation).max(0.0);
 
-                // Simple deterministic movement
-                self.position_x += (seed1 * 0.1).sin() * 2.0 * variation;
-                self.position_y += (seed1 * 0.1).cos() * 2.0 * variation;
+                // Simple deterministic movement with boundary constraints
+                // Grid world bounds are [-640, 640) to stay within 256x256 cells at cell_size=5.0
+                let movement_x = (seed1 * 0.1).sin() * 2.0 * variation;
+                let movement_y = (seed1 * 0.1).cos() * 2.0 * variation;
+                
+                let new_x = self.position_x + movement_x;
+                let new_y = self.position_y + movement_y;
+                
+                // Constrain to world bounds with small margin
+                const WORLD_BOUND: f32 = 630.0; // Stay within [-630, 630] for safety margin
+                self.position_x = new_x.clamp(-WORLD_BOUND, WORLD_BOUND);
+                self.position_y = new_y.clamp(-WORLD_BOUND, WORLD_BOUND);
 
                 // Expansion: Gain territory if military strength is sufficient
                 if self.military_strength > 60.0 {
@@ -205,8 +226,11 @@ impl From<&AiEntity> for EntitySnapshot {
 
 // Optimized spatial grid using fixed-size grid array instead of HashMap
 // For 10K entities distributed across reasonable space, we can use a bounded grid
-const GRID_SIZE: usize = 128; // 128x128 grid = 16384 cells
-const MAX_ENTITIES_PER_CELL: usize = 64; // Maximum entities per cell
+// Grid covers world bounds [-640, 640) with cell_size=5.0 giving 256x256 cells
+// With ~65K cells and 10K entities, each AI can occupy multiple cells for their territory
+// MAX_ENTITIES_PER_CELL represents how many entities can share a single cell position
+const GRID_SIZE: usize = 256; // 256x256 grid = 65536 cells (enough for 10K entities with room to grow)
+const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters but prevent single-cell overflow
 
 struct SpatialGrid {
     cell_size: f32,
@@ -586,8 +610,9 @@ mod tests {
         // Initial values now have variation
         assert!(entity.health >= 70.0 && entity.health <= 100.0);
         assert!(entity.military_strength >= 50.0 && entity.military_strength <= 100.0);
-        assert_eq!(entity.position_x, 0.0);
-        assert_eq!(entity.position_y, 0.0);
+        // Entities now spawn at random positions across the grid, not at (0,0)
+        assert!(entity.position_x >= -640.0 && entity.position_x <= 640.0);
+        assert!(entity.position_y >= -640.0 && entity.position_y <= 640.0);
         assert_eq!(entity.territory, 10.0);
         // State is now varied per entity
     }
@@ -807,10 +832,12 @@ mod tests {
         // Create a simulation with two entities
         let mut sim = Simulation::new(2);
         
-        // Set one entity to have zero health
+        // Set one entity to have zero health and position it
         sim.entities[0].health = 0.0;
         sim.entities[0].military_strength = 50.0;
         sim.entities[0].money = 100.0;
+        sim.entities[0].position_x = 0.0;
+        sim.entities[0].position_y = 0.0;
         
         // Set the other entity to Active state nearby
         sim.entities[1].state = AiState::Active;
