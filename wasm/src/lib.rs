@@ -18,6 +18,7 @@ pub enum AiState {
     Active = 1,
     Resting = 2,
     Moving = 3,
+    Dead = 4,
 }
 
 impl From<AiState> for u32 {
@@ -32,6 +33,7 @@ impl From<u32> for AiState {
             1 => AiState::Active,
             2 => AiState::Resting,
             3 => AiState::Moving,
+            4 => AiState::Dead,
             _ => AiState::Idle,
         }
     }
@@ -46,7 +48,8 @@ pub struct AiEntity {
     pub position_x: f32,
     pub position_y: f32,
     pub state: AiState,
-    pub territory: f32, // Territory controlled by this entity
+    pub territory: f32,  // Territory controlled by this entity
+    pub money: f32,      // Money/resources owned by this entity
 }
 
 impl AiEntity {
@@ -63,7 +66,11 @@ impl AiEntity {
         // Vary initial health between 70 and 100
         let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
         let initial_health = 70.0 + (health_variation * 30.0);
-
+        
+        // Vary initial money between 100 and 200
+        let money_variation = ((id_seed * 3.141).sin() + 1.0) / 2.0;
+        let initial_money = 100.0 + (money_variation * 100.0);
+        
         // Randomize initial state based on id
         let state_seed = ((id_seed * 2.718).sin() + 1.0) / 2.0;
         let initial_state = if state_seed < 0.25 {
@@ -83,7 +90,8 @@ impl AiEntity {
             position_x: 0.0,
             position_y: 0.0,
             state: initial_state,
-            territory: 10.0, // Start with small territory
+            territory: 10.0,  // Start with small territory
+            money: initial_money,
         }
     }
 
@@ -148,6 +156,10 @@ impl AiEntity {
                 if self.military_strength > 90.0 {
                     self.state = AiState::Active;
                 }
+            }
+            AiState::Dead => {
+                // Already handled above, but include for completeness
+                return;
             }
         }
 
@@ -339,6 +351,61 @@ impl Simulation {
 
             let entity = &mut self.entities[i];
             entity.update(self.tick, &snapshots, &neighbor_indices);
+        }
+        
+        // Process deaths and transfer resources
+        // Collect information about deaths and who should receive resources
+        let mut resource_transfers: Vec<(u32, f32, f32)> = Vec::new(); // (attacker_id, military_strength, money)
+        let mut dead_ids: Vec<u32> = Vec::new();
+        
+        for entity in &self.entities {
+            if entity.health <= 0.0 && entity.state != AiState::Dead {
+                let military_strength = entity.military_strength;
+                let money = entity.money;
+                
+                // Find nearest Active attacker
+                let mut nearest_attacker_id: Option<u32> = None;
+                let mut nearest_distance = f32::INFINITY;
+                
+                for other in &self.entities {
+                    if other.id != entity.id && other.state == AiState::Active {
+                        let dx = entity.position_x - other.position_x;
+                        let dy = entity.position_y - other.position_y;
+                        let distance = (dx * dx + dy * dy).sqrt();
+                        
+                        if distance < nearest_distance {
+                            nearest_distance = distance;
+                            nearest_attacker_id = Some(other.id);
+                        }
+                    }
+                }
+                
+                // Record transfer if attacker found
+                if let Some(attacker_id) = nearest_attacker_id {
+                    resource_transfers.push((attacker_id, military_strength, money));
+                }
+                
+                dead_ids.push(entity.id);
+            }
+        }
+        
+        // Apply resource transfers to attackers
+        for (attacker_id, military_strength, money) in resource_transfers {
+            if let Some(attacker) = self.entities.iter_mut().find(|e| e.id == attacker_id) {
+                attacker.military_strength += military_strength;
+                attacker.money += money;
+            }
+        }
+        
+        // Set dead entities to terminal state with all values at zero
+        for dead_id in dead_ids {
+            if let Some(dead_entity) = self.entities.iter_mut().find(|e| e.id == dead_id) {
+                dead_entity.state = AiState::Dead;
+                dead_entity.health = 0.0;
+                dead_entity.military_strength = 0.0;
+                dead_entity.money = 0.0;
+                dead_entity.territory = 0.0;
+            }
         }
     }
 
@@ -663,5 +730,137 @@ mod tests {
             dur_1k,
             dur_2k
         );
+    }
+
+    #[test]
+    fn test_death_when_health_reaches_zero() {
+        // Create a simulation with two entities
+        let mut sim = Simulation::new(2);
+        
+        // Set one entity to have zero health
+        sim.entities[0].health = 0.0;
+        sim.entities[0].military_strength = 50.0;
+        sim.entities[0].money = 100.0;
+        
+        // Set the other entity to Active state nearby
+        sim.entities[1].state = AiState::Active;
+        sim.entities[1].position_x = 5.0;
+        sim.entities[1].position_y = 0.0;
+        
+        let initial_attacker_military = sim.entities[1].military_strength;
+        let initial_attacker_money = sim.entities[1].money;
+        
+        // Run one step to process death
+        sim.step();
+        
+        // First entity should be dead with all stats at zero
+        assert_eq!(sim.entities[0].state, AiState::Dead, "Entity with zero health should be dead");
+        assert_eq!(sim.entities[0].health, 0.0, "Dead entity health should be 0");
+        assert_eq!(sim.entities[0].military_strength, 0.0, "Dead entity military strength should be 0");
+        assert_eq!(sim.entities[0].money, 0.0, "Dead entity money should be 0");
+        assert_eq!(sim.entities[0].territory, 0.0, "Dead entity territory should be 0");
+        
+        // Second entity should have received the resources
+        assert!(sim.entities[1].military_strength > initial_attacker_military, "Attacker should receive military strength");
+        assert!(sim.entities[1].money > initial_attacker_money, "Attacker should receive money");
+    }
+
+    #[test]
+    fn test_dead_entities_dont_update() {
+        // Create entity and set it to dead state
+        let mut entity = AiEntity::new(0);
+        entity.state = AiState::Dead;
+        entity.health = 0.0;
+        entity.military_strength = 0.0;
+        entity.money = 0.0;
+        entity.territory = 0.0;
+        
+        let entities = vec![entity.clone()];
+        entity.update(1, &entities);
+        
+        // All stats should remain at zero
+        assert_eq!(entity.state, AiState::Dead, "Dead entity should stay dead");
+        assert_eq!(entity.health, 0.0, "Dead entity health should stay 0");
+        assert_eq!(entity.military_strength, 0.0, "Dead entity military strength should stay 0");
+        assert_eq!(entity.money, 0.0, "Dead entity money should stay 0");
+        assert_eq!(entity.territory, 0.0, "Dead entity territory should stay 0");
+    }
+
+    #[test]
+    fn test_dead_entities_dont_attack() {
+        // Create entity with dead attacker nearby
+        let mut entity = AiEntity::new(0);
+        entity.health = 50.0;
+        entity.position_x = 0.0;
+        entity.position_y = 0.0;
+        
+        let mut dead_attacker = AiEntity::new(1);
+        dead_attacker.state = AiState::Dead;
+        dead_attacker.position_x = 5.0;
+        dead_attacker.position_y = 0.0;
+        dead_attacker.military_strength = 0.0;
+        
+        let initial_health = entity.health;
+        
+        let entities = vec![entity.clone(), dead_attacker];
+        entity.update(1, &entities);
+        
+        // Health should not decrease from dead attacker
+        assert!(entity.health >= initial_health, "Dead entities should not deal damage");
+    }
+
+    #[test]
+    fn test_entity_has_money_field() {
+        // Verify that entities are created with money
+        let entity = AiEntity::new(0);
+        assert!(entity.money > 0.0, "New entities should have money");
+        assert!(entity.money >= 100.0 && entity.money <= 200.0, "Money should be in expected range");
+    }
+
+    #[test]
+    fn test_resource_transfer_to_nearest_attacker() {
+        // Create a simulation with three entities
+        let mut sim = Simulation::new(3);
+        
+        // Entity 0 will die
+        sim.entities[0].health = 0.0;
+        sim.entities[0].military_strength = 100.0;
+        sim.entities[0].money = 200.0;
+        sim.entities[0].position_x = 0.0;
+        sim.entities[0].position_y = 0.0;
+        
+        // Entity 1 is Active and nearby (will receive resources)
+        sim.entities[1].state = AiState::Active;
+        sim.entities[1].position_x = 3.0;
+        sim.entities[1].position_y = 0.0;
+        let entity1_initial_military = sim.entities[1].military_strength;
+        let entity1_initial_money = sim.entities[1].money;
+        
+        // Entity 2 is Active but far away (should not receive resources)
+        sim.entities[2].state = AiState::Active;
+        sim.entities[2].position_x = 50.0;
+        sim.entities[2].position_y = 50.0;
+        let entity2_initial_military = sim.entities[2].military_strength;
+        let entity2_initial_money = sim.entities[2].money;
+        
+        // Run one step to process death
+        sim.step();
+        
+        // Entity 0 should be dead
+        assert_eq!(sim.entities[0].state, AiState::Dead);
+        
+        // Entity 1 (nearest) should have received resources
+        // Note: military strength also changes during update, so we check it increased by at least the transferred amount
+        assert!(sim.entities[1].military_strength >= entity1_initial_military + 100.0 - 1.0, 
+                "Entity 1 should receive military strength from dead entity");
+        assert!(sim.entities[1].money >= entity1_initial_money + 200.0, 
+                "Entity 1 should receive money from dead entity");
+        
+        // Entity 2 (far) should not have received the dead entity's resources
+        // Check that Entity 2's resources didn't increase by the same large amount
+        let entity2_military_gain = sim.entities[2].military_strength - entity2_initial_military;
+        let entity2_money_gain = sim.entities[2].money - entity2_initial_money;
+        assert!(entity2_military_gain < 50.0, "Entity 2 should not receive significant military strength");
+        assert!(entity2_money_gain < 50.0, "Entity 2 should not receive significant money");
     }
 }
