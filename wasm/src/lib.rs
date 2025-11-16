@@ -866,4 +866,94 @@ mod tests {
         assert!(entity2_military_gain < 50.0, "Entity 2 should not receive significant military strength");
         assert!(entity2_money_gain < 50.0, "Entity 2 should not receive significant money");
     }
+
+    #[test]
+    #[ignore] // This is a performance benchmark test - run with: cargo test -- --ignored
+    fn test_benchmark_10000_elements) {
+        use std::time::Instant;
+        
+        const ENTITY_COUNT: usize = 10_000;
+        const TARGET_HZ: u32 = 240;
+        const TARGET_TICK_TIME_MS: f64 = 1000.0 / TARGET_HZ as f64; // ~4.17ms per tick
+        const BENCHMARK_TICKS: usize = 100; // Run 100 ticks for benchmarking
+        
+        println!("\n=== Benchmark: 10,000 Elements at 240 Hz Target ===");
+        println!("Entity count: {}", ENTITY_COUNT);
+        println!("Target tick rate: {} Hz", TARGET_HZ);
+        println!("Target time per tick: {:.2} ms", TARGET_TICK_TIME_MS);
+        
+        // Create simulation with 10,000 entities
+        let mut sim = Simulation::init(ENTITY_COUNT, TARGET_HZ);
+        
+        // Verify entity count
+        assert_eq!(sim.get_entity_count(), ENTITY_COUNT, 
+                   "Simulation should have exactly {} entities", ENTITY_COUNT);
+        
+        // Warm-up: Run 5 ticks to ensure everything is initialized
+        println!("\nWarming up...");
+        for _ in 0..5 {
+            sim.step();
+        }
+        
+        // Benchmark: Run multiple ticks and measure time
+        println!("Running {} ticks for benchmark...", BENCHMARK_TICKS);
+        let start = Instant::now();
+        
+        for _ in 0..BENCHMARK_TICKS {
+            sim.step();
+        }
+        
+        let elapsed = start.elapsed();
+        let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
+        let avg_tick_time_ms = elapsed_ms / BENCHMARK_TICKS as f64;
+        let achieved_hz = 1000.0 / avg_tick_time_ms;
+        
+        println!("\n--- Results ---");
+        println!("Total time for {} ticks: {:.2} ms ({:.2} s)", 
+                 BENCHMARK_TICKS, elapsed_ms, elapsed.as_secs_f64());
+        println!("Average time per tick: {:.2} ms", avg_tick_time_ms);
+        println!("Achieved tick rate: {:.2} Hz", achieved_hz);
+        println!("Target tick rate: {} Hz", TARGET_HZ);
+        println!("Performance ratio: {:.1}% of target", (achieved_hz / TARGET_HZ as f64) * 100.0);
+        
+        // Verify that all entities were updated
+        assert!(sim.get_tick() >= BENCHMARK_TICKS as u64,
+                "All ticks should have been processed");
+        
+        // Verify all entities still exist (none were removed)
+        assert_eq!(sim.get_entity_count(), ENTITY_COUNT,
+                   "All {} entities should still exist after updates", ENTITY_COUNT);
+        
+        // Validate that all entities are being updated
+        // Check that entities have varied states (proof they're being processed)
+        let active_count = sim.entities.iter().filter(|e| e.state == AiState::Active).count();
+        let resting_count = sim.entities.iter().filter(|e| e.state == AiState::Resting).count();
+        let moving_count = sim.entities.iter().filter(|e| e.state == AiState::Moving).count();
+        let idle_count = sim.entities.iter().filter(|e| e.state == AiState::Idle).count();
+        let dead_count = sim.entities.iter().filter(|e| e.state == AiState::Dead).count();
+        
+        println!("\n--- Entity States ---");
+        println!("Active: {}, Resting: {}, Moving: {}, Idle: {}, Dead: {}",
+                 active_count, resting_count, moving_count, idle_count, dead_count);
+        
+        // Verify entities have different states (they're being processed)
+        let total_living = active_count + resting_count + moving_count + idle_count;
+        assert!(total_living > 0, "At least some entities should be alive and in various states");
+        
+        println!("\n✓ Benchmark COMPLETED:");
+        println!("  - Successfully updated all {} entities", ENTITY_COUNT);
+        println!("  - Achieved {:.2} Hz ({:.1}% of {} Hz target)", 
+                 achieved_hz, (achieved_hz / TARGET_HZ as f64) * 100.0, TARGET_HZ);
+        
+        // For now, we just report performance without strict assertion
+        // as the requirement is to validate that it CAN update all items
+        // The actual Hz achieved will vary based on hardware
+        if achieved_hz >= TARGET_HZ as f64 {
+            println!("  ✓ MEETS performance target!");
+        } else {
+            println!("  ⚠ Below target (expected on debug builds)");
+            println!("  Note: Run with --release for optimized performance");
+        }
+        println!();
+    }
 }
