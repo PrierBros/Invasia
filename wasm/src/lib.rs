@@ -165,7 +165,7 @@ impl AiEntity {
         // Apply combat damage from nearby Active entities
         let mut total_damage = 0.0;
         for other in all_entities {
-            if other.id != self.id && other.state == AiState::Active && other.state != AiState::Dead {
+            if other.id != self.id && other.state == AiState::Active {
                 let dx = self.position_x - other.position_x;
                 let dy = self.position_y - other.position_y;
                 let distance = (dx * dx + dy * dy).sqrt();
