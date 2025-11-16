@@ -372,7 +372,6 @@ impl Simulation {
 
         // Reuse snapshot buffer
         self.snapshot_buffer.clear();
-        self.snapshot_buffer.reserve(self.entities.len());
         for entity in &self.entities {
             self.snapshot_buffer.push(EntitySnapshot::from(entity));
         }
