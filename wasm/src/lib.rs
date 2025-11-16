@@ -775,8 +775,8 @@ mod tests {
         entity.money = 0.0;
         entity.territory = 0.0;
         
-        let entities = vec![entity.clone()];
-        entity.update(1, &entities);
+        let snapshots: Vec<EntitySnapshot> = vec![EntitySnapshot::from(&entity)];
+        entity.update(1, &snapshots, &[]);
         
         // All stats should remain at zero
         assert_eq!(entity.state, AiState::Dead, "Dead entity should stay dead");
@@ -802,8 +802,11 @@ mod tests {
         
         let initial_health = entity.health;
         
-        let entities = vec![entity.clone(), dead_attacker];
-        entity.update(1, &entities);
+        let snapshots: Vec<EntitySnapshot> = vec![
+            EntitySnapshot::from(&entity),
+            EntitySnapshot::from(&dead_attacker),
+        ];
+        entity.update(1, &snapshots, &[1]);
         
         // Health should not decrease from dead attacker
         assert!(entity.health >= initial_health, "Dead entities should not deal damage");
