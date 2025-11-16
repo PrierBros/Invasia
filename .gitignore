@@ -29,3 +29,10 @@ pnpm-debug.log*
 wasm/target/
 wasm/Cargo.lock
 src/wasm/
+
+# Test artifacts
+/test-results/
+/playwright-report/
+/playwright/.cache/
+*.png
+!public/**/*.png
