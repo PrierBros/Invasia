@@ -186,7 +186,6 @@ impl AiEntity {
 
 #[derive(Clone, Copy)]
 struct EntitySnapshot {
-    id: u32,
     position_x: f32,
     position_y: f32,
     state: AiState,
@@ -196,7 +195,6 @@ struct EntitySnapshot {
 impl From<&AiEntity> for EntitySnapshot {
     fn from(entity: &AiEntity) -> Self {
         Self {
-            id: entity.id,
             position_x: entity.position_x,
             position_y: entity.position_y,
             state: entity.state,
@@ -297,8 +295,8 @@ pub struct Simulation {
     neighbor_buffer: Vec<usize>,
     snapshot_buffer: Vec<EntitySnapshot>,
     // Buffers for death/resource processing
-    resource_transfers: Vec<(u32, f32, f32)>,
-    dead_ids: Vec<u32>,
+    resource_transfers: Vec<(usize, f32, f32)>, // Changed to use indices instead of IDs
+    dead_indices: Vec<usize>,
 }
 
 #[wasm_bindgen]
@@ -321,7 +319,7 @@ impl Simulation {
             neighbor_buffer: Vec::with_capacity(256), // Pre-allocate for neighbors
             snapshot_buffer: Vec::with_capacity(entity_count),
             resource_transfers: Vec::with_capacity(128),
-            dead_ids: Vec::with_capacity(128),
+            dead_indices: Vec::with_capacity(128),
         }
     }
 
@@ -361,7 +359,7 @@ impl Simulation {
         self.neighbor_buffer.clear();
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
-        self.dead_ids.clear();
+        self.dead_indices.clear();
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
@@ -374,14 +372,18 @@ impl Simulation {
 
         // Reuse snapshot buffer
         self.snapshot_buffer.clear();
-        self.snapshot_buffer.extend(self.entities.iter().map(EntitySnapshot::from));
+        self.snapshot_buffer.reserve(self.entities.len());
+        for entity in &self.entities {
+            self.snapshot_buffer.push(EntitySnapshot::from(entity));
+        }
 
         self.grid.rebuild(&self.snapshot_buffer);
 
         // Update entities using pre-allocated neighbor buffer
-        for i in 0..self.entities.len() {
+        let entities_len = self.entities.len();
+        for i in 0..entities_len {
             self.neighbor_buffer.clear();
-            let entity_snapshot = self.snapshot_buffer[i];
+            let entity_snapshot = unsafe { *self.snapshot_buffer.get_unchecked(i) };
             self.grid.query_neighbors(
                 entity_snapshot.position_x,
                 entity_snapshot.position_y,
@@ -389,24 +391,25 @@ impl Simulation {
             );
             self.neighbor_buffer.retain(|&index| index != i);
 
-            let entity = &mut self.entities[i];
+            let entity = unsafe { self.entities.get_unchecked_mut(i) };
             entity.update(self.tick, &self.snapshot_buffer, &self.neighbor_buffer);
         }
         
         // Process deaths and transfer resources using pre-allocated buffers
-        // Optimized single-pass approach
+        // Optimized single-pass approach with index-based lookups
         self.resource_transfers.clear();
-        self.dead_ids.clear();
+        self.dead_indices.clear();
         
         // Single pass to identify dead entities and their resources
-        for entity in &self.entities {
+        for i in 0..entities_len {
+            let entity = unsafe { self.entities.get_unchecked(i) };
             if entity.health <= 0.0 && entity.state != AiState::Dead {
-                self.dead_ids.push(entity.id);
+                self.dead_indices.push(i);
                 
                 // Find nearest Active attacker (only if there are resources to transfer)
                 if entity.military_strength > 0.0 || entity.money > 0.0 {
-                    let mut nearest_attacker_id: Option<u32> = None;
-                    let mut nearest_distance = f32::INFINITY;
+                    let mut nearest_attacker_idx: Option<usize> = None;
+                    let mut nearest_dist_sq = f32::INFINITY;
                     
                     // Use spatial grid to find nearby attackers more efficiently
                     self.neighbor_buffer.clear();
@@ -417,46 +420,44 @@ impl Simulation {
                     );
                     
                     for &idx in &self.neighbor_buffer {
-                        let other = &self.entities[idx];
-                        if other.id != entity.id && other.state == AiState::Active {
-                            let dx = entity.position_x - other.position_x;
-                            let dy = entity.position_y - other.position_y;
-                            let distance = (dx * dx + dy * dy).sqrt();
-                            
-                            if distance < nearest_distance {
-                                nearest_distance = distance;
-                                nearest_attacker_id = Some(other.id);
+                        if idx != i {
+                            let other = unsafe { self.entities.get_unchecked(idx) };
+                            if other.state == AiState::Active {
+                                let dx = entity.position_x - other.position_x;
+                                let dy = entity.position_y - other.position_y;
+                                let dist_sq = dx * dx + dy * dy;
+                                
+                                if dist_sq < nearest_dist_sq {
+                                    nearest_dist_sq = dist_sq;
+                                    nearest_attacker_idx = Some(idx);
+                                }
                             }
                         }
                     }
                     
                     // Record transfer if attacker found
-                    if let Some(attacker_id) = nearest_attacker_id {
-                        self.resource_transfers.push((attacker_id, entity.military_strength, entity.money));
+                    if let Some(attacker_idx) = nearest_attacker_idx {
+                        self.resource_transfers.push((attacker_idx, entity.military_strength, entity.money));
                     }
                 }
             }
         }
         
-        // Apply resource transfers to attackers (optimized lookup)
-        for &(attacker_id, military_strength, money) in &self.resource_transfers {
-            // Direct index lookup would be faster but entities don't store their index
-            // For now, keep the find but it's only done for actual transfers
-            if let Some(attacker) = self.entities.iter_mut().find(|e| e.id == attacker_id) {
-                attacker.military_strength += military_strength;
-                attacker.money += money;
-            }
+        // Apply resource transfers to attackers (now O(1) lookups)
+        for &(attacker_idx, military_strength, money) in &self.resource_transfers {
+            let attacker = unsafe { self.entities.get_unchecked_mut(attacker_idx) };
+            attacker.military_strength += military_strength;
+            attacker.money += money;
         }
         
-        // Set dead entities to terminal state with all values at zero
-        for &dead_id in &self.dead_ids {
-            if let Some(dead_entity) = self.entities.iter_mut().find(|e| e.id == dead_id) {
-                dead_entity.state = AiState::Dead;
-                dead_entity.health = 0.0;
-                dead_entity.military_strength = 0.0;
-                dead_entity.money = 0.0;
-                dead_entity.territory = 0.0;
-            }
+        // Set dead entities to terminal state with all values at zero (now O(1) lookups)
+        for &dead_idx in &self.dead_indices {
+            let dead_entity = unsafe { self.entities.get_unchecked_mut(dead_idx) };
+            dead_entity.state = AiState::Dead;
+            dead_entity.health = 0.0;
+            dead_entity.military_strength = 0.0;
+            dead_entity.money = 0.0;
+            dead_entity.territory = 0.0;
         }
     }
 
@@ -521,7 +522,7 @@ impl Simulation {
         self.neighbor_buffer.clear();
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
-        self.dead_ids.clear();
+        self.dead_indices.clear();
     }
 }
 
