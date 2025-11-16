@@ -9,15 +9,21 @@
     "build:wasm": "cd wasm && wasm-pack build --target web --out-dir ../src/wasm",
     "preview": "astro preview",
     "astro": "astro",
-    "test:wasm": "cd wasm && cargo test"
+    "test:wasm": "cd wasm && cargo test",
+    "test:wasm:bench": "cd wasm && cargo test --release -- --ignored --nocapture",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test": "npm run test:wasm && npm run test:e2e"
   },
   "dependencies": {
-    "astro": "^4.16.0",
     "@astrojs/svelte": "^5.7.2",
+    "astro": "^4.16.0",
     "svelte": "^4.2.19"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.5",
+    "@playwright/test": "^1.56.1",
     "typescript": "^5.9.3"
   }
 }
