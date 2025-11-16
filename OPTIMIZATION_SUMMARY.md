@@ -9,11 +9,11 @@
 
 ### Optimization Techniques Applied
 
-#### 1. Stack-Based Spatial Grid
+#### 1. Fixed-Capacity Inline Array Grid
 **Changed**: Replaced `HashMap<(i32, i32), Vec<usize>>` with fixed-size array-based grid
-- Grid size: 128×128 = 16,384 cells
-- Max entities per cell: 64
-- **Impact**: Eliminated heap allocations on every rebuild, improved cache locality
+- Grid size: 128×128 = 16,384 cells (heap-allocated Vec with pre-allocated capacity)
+- Max entities per cell: 64 (stored inline within each cell tuple)
+- **Impact**: Eliminated repeated heap allocations on every rebuild, improved cache locality through inline storage
 
 #### 2. Pre-allocated Reusable Buffers
 **Added**: Persistent buffers in `Simulation` struct:
@@ -79,11 +79,12 @@ Simulation
 Simulation
   ├─ entities: Vec<AiEntity>
   ├─ grid: SpatialGrid  
-  │    └─ cells: Vec<([usize; 64], usize)>        ← Stack-based, pre-allocated
+  │    └─ cells: Vec<([usize; 64], usize)>        ← Pre-allocated with inline storage
   ├─ neighbor_buffer: Vec<usize>                  ← Reusable
   ├─ snapshot_buffer: Vec<EntitySnapshot>         ← Reusable
   ├─ resource_transfers: Vec<(usize, f32, f32)>  ← Reusable
-  └─ dead_indices: Vec<usize>                     ← Reusable
+  ├─ dead_indices: Vec<usize>                     ← Reusable
+  └─ attacker_search_buffer: Vec<usize>           ← Reusable (separate from neighbor_buffer)
 ```
 
 ## Deterministic AI Decisions
@@ -139,10 +140,12 @@ All tests pass including:
 ## Conclusion
 
 We achieved a **16.2x performance improvement** through:
-- Stack-based data structures with provable bounds
-- Pre-allocated reusable buffers
+- Fixed-capacity inline array grid with provable bounds
+- Pre-allocated reusable buffers (including separate buffers for different purposes)
 - Index-based lookups
 - Elimination of redundant operations
 - Compiler optimizations
+- Debug assertions for unsafe code
+- Cell overflow detection and warnings
 
 The system is now **fully deterministic** and processes 10,000 entities at nearly **100 Hz**, a significant improvement from the initial 6 Hz. Further gains to reach 240 Hz would require more fundamental architectural changes such as SIMD or parallelization.

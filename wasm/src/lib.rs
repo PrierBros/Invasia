@@ -215,6 +215,7 @@ struct SpatialGrid {
     cells: Vec<([usize; MAX_ENTITIES_PER_CELL], usize)>,
     grid_min: (i32, i32),
     grid_max: (i32, i32),
+    overflow_count: usize, // Track how many entities couldn't be added due to cell capacity
 }
 
 impl SpatialGrid {
@@ -229,6 +230,7 @@ impl SpatialGrid {
             cells,
             grid_min: (-(GRID_SIZE as i32 / 2), -(GRID_SIZE as i32 / 2)),
             grid_max: (GRID_SIZE as i32 / 2, GRID_SIZE as i32 / 2),
+            overflow_count: 0,
         }
     }
 
@@ -237,6 +239,7 @@ impl SpatialGrid {
         for cell in &mut self.cells {
             cell.1 = 0;
         }
+        self.overflow_count = 0;
     }
 
     fn cell_coords(&self, x: f32, y: f32) -> (i32, i32) {
@@ -263,7 +266,32 @@ impl SpatialGrid {
                 if cell.1 < MAX_ENTITIES_PER_CELL {
                     cell.0[cell.1] = index;
                     cell.1 += 1;
+                } else {
+                    // Track overflow: entity couldn't be added to grid cell
+                    // This may cause incorrect neighbor queries and combat issues
+                    self.overflow_count += 1;
+                    #[cfg(debug_assertions)]
+                    {
+                        eprintln!(
+                            "Warning: Spatial grid cell at ({}, {}) is full (max {} entities). \
+                             Entity {} at ({:.2}, {:.2}) dropped. Total overflow: {}",
+                            coords.0, coords.1, MAX_ENTITIES_PER_CELL,
+                            index, entity.position_x, entity.position_y,
+                            self.overflow_count
+                        );
+                    }
                 }
+            }
+        }
+        
+        // Log total overflow if it occurred
+        #[cfg(debug_assertions)]
+        {
+            if self.overflow_count > 0 {
+                eprintln!(
+                    "Spatial grid rebuild complete. {} entities couldn't be added due to cell capacity limits.",
+                    self.overflow_count
+                );
             }
         }
     }
@@ -297,6 +325,7 @@ pub struct Simulation {
     // Buffers for death/resource processing
     resource_transfers: Vec<(usize, f32, f32)>, // Changed to use indices instead of IDs
     dead_indices: Vec<usize>,
+    attacker_search_buffer: Vec<usize>, // Separate buffer for finding attackers during death processing
 }
 
 #[wasm_bindgen]
@@ -320,6 +349,7 @@ impl Simulation {
             snapshot_buffer: Vec::with_capacity(entity_count),
             resource_transfers: Vec::with_capacity(128),
             dead_indices: Vec::with_capacity(128),
+            attacker_search_buffer: Vec::with_capacity(256),
         }
     }
 
@@ -360,6 +390,7 @@ impl Simulation {
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
         self.dead_indices.clear();
+        self.attacker_search_buffer.clear();
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
@@ -370,7 +401,7 @@ impl Simulation {
     pub fn step(&mut self) {
         self.tick = self.tick.wrapping_add(1);
 
-        // Reuse snapshot buffer
+        // Reuse snapshot buffer - capacity is pre-allocated in constructor
         self.snapshot_buffer.clear();
         for entity in &self.entities {
             self.snapshot_buffer.push(EntitySnapshot::from(entity));
@@ -382,7 +413,11 @@ impl Simulation {
         let entities_len = self.entities.len();
         for i in 0..entities_len {
             self.neighbor_buffer.clear();
+            
+            // Safety: i is bounded by entities_len which equals self.entities.len()
+            debug_assert!(i < self.snapshot_buffer.len());
             let entity_snapshot = unsafe { *self.snapshot_buffer.get_unchecked(i) };
+            
             self.grid.query_neighbors(
                 entity_snapshot.position_x,
                 entity_snapshot.position_y,
@@ -390,18 +425,24 @@ impl Simulation {
             );
             self.neighbor_buffer.retain(|&index| index != i);
 
+            // Safety: i is bounded by entities_len which equals self.entities.len()
+            debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked_mut(i) };
             entity.update(self.tick, &self.snapshot_buffer, &self.neighbor_buffer);
         }
         
         // Process deaths and transfer resources using pre-allocated buffers
-        // Optimized single-pass approach with index-based lookups
+        // Note: This has O(dead_count * neighbors_per_dead_entity) complexity.
+        // In scenarios with many simultaneous deaths, this could cause frame spikes.
         self.resource_transfers.clear();
         self.dead_indices.clear();
         
         // Single pass to identify dead entities and their resources
         for i in 0..entities_len {
+            // Safety: i is bounded by entities_len which equals self.entities.len()
+            debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked(i) };
+            
             if entity.health <= 0.0 && entity.state != AiState::Dead {
                 self.dead_indices.push(i);
                 
@@ -411,16 +452,20 @@ impl Simulation {
                     let mut nearest_dist_sq = f32::INFINITY;
                     
                     // Use spatial grid to find nearby attackers more efficiently
-                    self.neighbor_buffer.clear();
+                    // Using separate buffer to avoid confusion with neighbor_buffer
+                    self.attacker_search_buffer.clear();
                     self.grid.query_neighbors(
                         entity.position_x,
                         entity.position_y,
-                        &mut self.neighbor_buffer,
+                        &mut self.attacker_search_buffer,
                     );
                     
-                    for &idx in &self.neighbor_buffer {
+                    for &idx in &self.attacker_search_buffer {
                         if idx != i {
+                            // Safety: idx comes from spatial grid which only contains valid entity indices
+                            debug_assert!(idx < self.entities.len());
                             let other = unsafe { self.entities.get_unchecked(idx) };
+                            
                             if other.state == AiState::Active {
                                 let dx = entity.position_x - other.position_x;
                                 let dy = entity.position_y - other.position_y;
@@ -444,6 +489,8 @@ impl Simulation {
         
         // Apply resource transfers to attackers (now O(1) lookups)
         for &(attacker_idx, military_strength, money) in &self.resource_transfers {
+            // Safety: attacker_idx comes from the loop above which uses valid entity indices
+            debug_assert!(attacker_idx < self.entities.len());
             let attacker = unsafe { self.entities.get_unchecked_mut(attacker_idx) };
             attacker.military_strength += military_strength;
             attacker.money += money;
@@ -451,6 +498,8 @@ impl Simulation {
         
         // Set dead entities to terminal state with all values at zero (now O(1) lookups)
         for &dead_idx in &self.dead_indices {
+            // Safety: dead_idx comes from the loop above which uses valid entity indices
+            debug_assert!(dead_idx < self.entities.len());
             let dead_entity = unsafe { self.entities.get_unchecked_mut(dead_idx) };
             dead_entity.state = AiState::Dead;
             dead_entity.health = 0.0;
@@ -522,6 +571,7 @@ impl Simulation {
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
         self.dead_indices.clear();
+        self.attacker_search_buffer.clear();
     }
 }
 
