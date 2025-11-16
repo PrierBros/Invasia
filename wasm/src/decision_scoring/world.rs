@@ -213,13 +213,14 @@ impl DecisionSystem {
                 let mut best_score = f32::NEG_INFINITY;
                 let mut best_components = ScoreComponents::zero();
                 let mut scored_actions = Vec::new();
-                
-                for action in &shortlist {
-                    let components = score_action(country, action, &self.world, &self.luts);
-                    let score = components.final_score(&country.weights);
-                    
+
+                let batch = score_actions_batch(country, &shortlist, &self.world, &self.luts);
+                for (idx, action) in shortlist.iter().enumerate() {
+                    let components = &batch.components[idx];
+                    let score = batch.final_scores[idx];
+
                     scored_actions.push((action.description(), score));
-                    
+
                     if score > best_score {
                         best_score = score;
                         best_action = action.clone();

@@ -112,6 +112,7 @@ The system produces **bit-identical** results across runs, satisfying the spec's
 - **Per-tick cost**: O(countries × avg_degree × shortlist_size)
 - **No global scans**: All computations use local/cached data
 - **Bounded candidate lists**: Top-K pruning prevents combinatorial explosion
+- **SIMD batch scoring**: `score_actions_batch` fuses dot products using wasm `simd128` when available, with scalar fallback elsewhere (set `RUSTFLAGS="-C target-feature=+simd128"` or an equivalent toolchain flag during wasm builds to activate it)
 - **Fixed-point arithmetic**: All LUTs use precomputed tables
 
 ## Normalization
@@ -160,7 +161,7 @@ const world = system.get_world_snapshot();
 ## Future Enhancements
 
 Potential improvements:
-- [ ] SIMD optimizations for batch scoring
+- [x] SIMD optimizations for batch scoring
 - [ ] Incremental threat index updates (currently recomputed each tick)
 - [ ] Machine learning for weight tuning
 - [ ] Advanced diplomacy modeling

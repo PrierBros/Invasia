@@ -5,6 +5,9 @@ use super::country::*;
 use super::luts::*;
 use super::world::WorldState;
 
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use core::arch::wasm32;
+
 /// Six-channel score components (§1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreComponents {
@@ -44,6 +47,130 @@ impl ScoreComponents {
         kappa * self.cost -
         rho * self.risk
     }
+}
+
+/// Batched scoring output bundling per-action components and final scores
+#[derive(Debug, Clone)]
+pub struct BatchScoreResult {
+    pub components: Vec<ScoreComponents>,
+    pub final_scores: Vec<f32>,
+}
+
+impl BatchScoreResult {
+    pub fn new(components: Vec<ScoreComponents>, final_scores: Vec<f32>) -> Self {
+        Self { components, final_scores }
+    }
+}
+
+/// Score all actions up-front and fuse final score computation with SIMD acceleration when available.
+pub fn score_actions_batch(
+    country: &Country,
+    actions: &[Action],
+    world: &WorldState,
+    luts: &LookupTables,
+) -> BatchScoreResult {
+    if actions.is_empty() {
+        return BatchScoreResult::new(Vec::new(), Vec::new());
+    }
+
+    let mut components = Vec::with_capacity(actions.len());
+    for action in actions {
+        components.push(score_action(country, action, world, luts));
+    }
+
+    let final_scores = finalize_scores_batch(&components, &country.weights);
+    BatchScoreResult::new(components, final_scores)
+}
+
+fn finalize_scores_batch(components: &[ScoreComponents], weights: &AdaptiveWeights) -> Vec<f32> {
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe { finalize_scores_batch_simd(components, weights) }
+    }
+    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    {
+        finalize_scores_batch_scalar(components, weights)
+    }
+}
+
+fn finalize_scores_batch_scalar(components: &[ScoreComponents], weights: &AdaptiveWeights) -> Vec<f32> {
+    components.iter().map(|c| c.final_score(weights)).collect()
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+unsafe fn finalize_scores_batch_simd(
+    components: &[ScoreComponents],
+    weights: &AdaptiveWeights,
+) -> Vec<f32> {
+    use core::mem::transmute;
+
+    let mut scores = vec![0.0; components.len()];
+
+    let w_res = wasm32::f32x4_splat(weights.alpha as f32);
+    let w_sec = wasm32::f32x4_splat(weights.beta as f32);
+    let w_growth = wasm32::f32x4_splat(weights.gamma as f32);
+    let w_pos = wasm32::f32x4_splat(weights.delta as f32);
+    let w_cost = wasm32::f32x4_splat(weights.kappa as f32);
+    let w_risk = wasm32::f32x4_splat(weights.rho as f32);
+
+    let mut offset = 0;
+    let mut chunks = components.chunks_exact(4);
+    for chunk in chunks.by_ref() {
+        let delta_res = wasm32::f32x4_make(
+            chunk[0].delta_res,
+            chunk[1].delta_res,
+            chunk[2].delta_res,
+            chunk[3].delta_res,
+        );
+        let delta_sec = wasm32::f32x4_make(
+            chunk[0].delta_sec,
+            chunk[1].delta_sec,
+            chunk[2].delta_sec,
+            chunk[3].delta_sec,
+        );
+        let delta_growth = wasm32::f32x4_make(
+            chunk[0].delta_growth,
+            chunk[1].delta_growth,
+            chunk[2].delta_growth,
+            chunk[3].delta_growth,
+        );
+        let delta_pos = wasm32::f32x4_make(
+            chunk[0].delta_pos,
+            chunk[1].delta_pos,
+            chunk[2].delta_pos,
+            chunk[3].delta_pos,
+        );
+        let cost = wasm32::f32x4_make(
+            chunk[0].cost,
+            chunk[1].cost,
+            chunk[2].cost,
+            chunk[3].cost,
+        );
+        let risk = wasm32::f32x4_make(
+            chunk[0].risk,
+            chunk[1].risk,
+            chunk[2].risk,
+            chunk[3].risk,
+        );
+
+        let mut acc = wasm32::f32x4_mul(delta_res, w_res);
+        acc = wasm32::f32x4_add(acc, wasm32::f32x4_mul(delta_sec, w_sec));
+        acc = wasm32::f32x4_add(acc, wasm32::f32x4_mul(delta_growth, w_growth));
+        acc = wasm32::f32x4_add(acc, wasm32::f32x4_mul(delta_pos, w_pos));
+        acc = wasm32::f32x4_sub(acc, wasm32::f32x4_mul(cost, w_cost));
+        acc = wasm32::f32x4_sub(acc, wasm32::f32x4_mul(risk, w_risk));
+
+        let acc_arr: [f32; 4] = transmute(acc);
+        scores[offset..offset + 4].copy_from_slice(&acc_arr);
+        offset += 4;
+    }
+
+    for component in chunks.remainder() {
+        scores[offset] = component.final_score(weights);
+        offset += 1;
+    }
+
+    scores
 }
 
 /// Compute threat index for a country (§2)
@@ -416,7 +543,6 @@ mod tests {
         
         // Should have some cost
         assert!(comp.cost > 0.0);
-        
         // Risk should be low
         assert!(comp.risk < 5.0);
     }
@@ -447,5 +573,35 @@ mod tests {
         assert_eq!(comp.delta_res, 0.0);
         assert_eq!(comp.delta_sec, 0.0);
         assert_eq!(comp.cost, 0.0);
+    }
+
+    #[test]
+    fn test_score_actions_batch_matches_scalar() {
+        let country = Country::new(1);
+        let world = WorldState::new();
+        let luts = LookupTables::new();
+        let actions = vec![
+            Action::Pass,
+            Action::Invest { sector: InvestSector::Economy },
+            Action::Research { tech: TechType::EconomicEfficiency },
+        ];
+
+        let batch = score_actions_batch(&country, &actions, &world, &luts);
+        assert_eq!(batch.components.len(), actions.len());
+        assert_eq!(batch.final_scores.len(), actions.len());
+
+        for (idx, action) in actions.iter().enumerate() {
+            let scalar_components = score_action(&country, action, &world, &luts);
+            let scalar_score = scalar_components.final_score(&country.weights);
+
+            let batch_components = &batch.components[idx];
+            assert_eq!(scalar_components.delta_res, batch_components.delta_res);
+            assert_eq!(scalar_components.delta_sec, batch_components.delta_sec);
+            assert_eq!(scalar_components.delta_growth, batch_components.delta_growth);
+            assert_eq!(scalar_components.delta_pos, batch_components.delta_pos);
+            assert_eq!(scalar_components.cost, batch_components.cost);
+            assert_eq!(scalar_components.risk, batch_components.risk);
+            assert!((scalar_score - batch.final_scores[idx]).abs() < 1e-4);
+        }
     }
 }
