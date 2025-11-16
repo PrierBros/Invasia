@@ -358,6 +358,10 @@ pub struct Simulation {
     resource_transfers: Vec<(usize, f32, f32)>, // Changed to use indices instead of IDs
     dead_indices: Vec<usize>,
     attacker_search_buffer: Vec<usize>, // Separate buffer for finding attackers during death processing
+    // Performance tracking
+    last_tick_duration_ms: f64,
+    last_snapshot_duration_ms: f64,
+    snapshot_dirty: bool, // Flag to track if snapshot needs updating
 }
 
 #[wasm_bindgen]
@@ -382,6 +386,9 @@ impl Simulation {
             resource_transfers: Vec::with_capacity(128),
             dead_indices: Vec::with_capacity(128),
             attacker_search_buffer: Vec::with_capacity(256),
+            last_tick_duration_ms: 0.0,
+            last_snapshot_duration_ms: 0.0,
+            snapshot_dirty: true,
         }
     }
 
@@ -426,14 +433,19 @@ impl Simulation {
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
+        self.snapshot_dirty = true;
     }
 
     /// Perform one simulation tick (update all entities)
     #[wasm_bindgen]
     pub fn step(&mut self) {
-        self.tick = self.tick.wrapping_add(1);
-
-        // Reuse snapshot buffer - capacity is pre-allocated in constructor
+        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        let start = web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .unwrap_or(0.0);
+            
+        self.tick = self.tick.wrapping_add(1);        // Reuse snapshot buffer - capacity is pre-allocated in constructor
         self.snapshot_buffer.clear();
         for entity in &self.entities {
             self.snapshot_buffer.push(EntitySnapshot::from(entity));
@@ -540,6 +552,15 @@ impl Simulation {
             dead_entity.money = 0.0;
             dead_entity.territory = 0.0;
         }
+        
+        // Mark snapshot as dirty since we've updated entities
+        self.snapshot_dirty = true;
+        
+        // Record timing (only on wasm32)
+        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
+            self.last_tick_duration_ms = perf.now() - start;
+        }
     }
 
     /// Update the simulation (call this in a loop when running)
@@ -588,9 +609,40 @@ impl Simulation {
     }
 
     /// Get snapshot of all entities as a JsValue
+    /// Only serializes if data has changed since last call
     #[wasm_bindgen]
-    pub fn get_snapshot(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL)
+    pub fn get_snapshot(&mut self) -> JsValue {
+        if !self.snapshot_dirty {
+            return JsValue::NULL; // Signal no update needed
+        }
+        
+        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        let start = web_sys::window()
+            .and_then(|w| w.performance())
+            .map(|p| p.now())
+            .unwrap_or(0.0);
+        
+        let result = serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL);
+        
+        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
+            self.last_snapshot_duration_ms = perf.now() - start;
+        }
+        
+        self.snapshot_dirty = false;
+        result
+    }
+    
+    /// Get last tick duration in milliseconds
+    #[wasm_bindgen]
+    pub fn get_last_tick_duration(&self) -> f64 {
+        self.last_tick_duration_ms
+    }
+    
+    /// Get last snapshot serialization duration in milliseconds
+    #[wasm_bindgen]
+    pub fn get_last_snapshot_duration(&self) -> f64 {
+        self.last_snapshot_duration_ms
     }
 
     /// Destroy the simulation (cleanup)

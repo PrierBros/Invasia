@@ -38,6 +38,12 @@
   let entityCount: number = 100;
   let tickRate: number = 60;
   
+  // Performance metrics
+  let actualTickRate: number = 0;
+  let tickDuration: number = 0;
+  let snapshotDuration: number = 0;
+  let lastTickTime: number = 0;
+  
   // Update loop
   let updateInterval: number | null = null;
   let renderInterval: number | null = null;
@@ -136,19 +142,34 @@
     simulation.set_entity_count(entityCount);
     simulation.set_tick_rate(tickRate);
     updateSnapshot();
+    
+    // Update render loop to match new tick rate
+    updateRenderLoop();
   }
 
   function startRenderLoop(): void {
-    // Render at ~30 FPS (independent of simulation tick rate)
+    // Adaptive render rate: match tick rate but cap at 60 FPS
+    // This reduces unnecessary snapshot calls when simulation is slow
+    const renderRate = Math.min(tickRate, 60);
+    const renderInterval_ms = 1000 / renderRate;
+    
     renderInterval = window.setInterval(() => {
       updateSnapshot();
-    }, 1000 / 30);
+    }, renderInterval_ms);
   }
 
   function stopRenderLoop(): void {
     if (renderInterval !== null) {
       clearInterval(renderInterval);
       renderInterval = null;
+    }
+  }
+
+  function updateRenderLoop(): void {
+    // Restart render loop with new rate when tick rate changes
+    stopRenderLoop();
+    if (wasmLoaded) {
+      startRenderLoop();
     }
   }
 
@@ -163,9 +184,25 @@
   function updateSnapshot(): void {
     if (!simulation || !wasmLoaded) return;
     
+    const currentTickTime = performance.now();
+    if (lastTickTime > 0) {
+      const timeSinceLastTick = currentTickTime - lastTickTime;
+      if (timeSinceLastTick > 0) {
+        actualTickRate = 1000 / timeSinceLastTick;
+      }
+    }
+    lastTickTime = currentTickTime;
+    
     tick = simulation.get_tick();
+    tickDuration = simulation.get_last_tick_duration();
+    
     const snapshot = simulation.get_snapshot();
-    entities = snapshot || [];
+    snapshotDuration = simulation.get_last_snapshot_duration();
+    
+    // Only update entities if snapshot is not null (data changed)
+    if (snapshot !== null && snapshot !== undefined) {
+      entities = snapshot || [];
+    }
   }
 
   function formatNumber(num: number): string {
@@ -279,6 +316,22 @@
       <p><strong>Tick:</strong> {tick}</p>
       <p><strong>Entities:</strong> {filteredEntities.length}{#if hideDeadAIs} / {entities.length}{/if}</p>
       <p><strong>Status:</strong> {isRunning ? '🟢 Running' : '🔴 Paused'}</p>
+      <div class="performance-metrics">
+        <p><strong>Target Tick Rate:</strong> {tickRate} Hz</p>
+        <p><strong>Actual Tick Rate:</strong> {actualTickRate.toFixed(1)} Hz</p>
+        <p><strong>Tick Duration:</strong> {tickDuration.toFixed(2)} ms</p>
+        <p><strong>Snapshot Time:</strong> {snapshotDuration.toFixed(2)} ms</p>
+        <p class="perf-indicator">
+          <strong>Performance:</strong> 
+          {#if actualTickRate >= tickRate * 0.9}
+            <span class="perf-good">✓ Good</span>
+          {:else if actualTickRate >= tickRate * 0.5}
+            <span class="perf-warn">⚠ Degraded</span>
+          {:else}
+            <span class="perf-bad">✗ Poor</span>
+          {/if}
+        </p>
+      </div>
       <label class="filter-checkbox">
         <input 
           type="checkbox" 
@@ -431,12 +484,44 @@
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid #ddd;
+    flex-wrap: wrap;
   }
 
   .stats p {
     margin: 0;
     font-size: 0.875rem;
     color: #555;
+  }
+
+  .performance-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background: #f9fafb;
+    border-radius: 0.375rem;
+    border: 1px solid #e5e7eb;
+  }
+
+  .performance-metrics p {
+    margin: 0;
+    font-size: 0.75rem;
+  }
+
+  .perf-indicator {
+    font-weight: 600;
+  }
+
+  .perf-good {
+    color: #10b981;
+  }
+
+  .perf-warn {
+    color: #f59e0b;
+  }
+
+  .perf-bad {
+    color: #ef4444;
   }
 
   .filter-checkbox {

@@ -34,69 +34,86 @@ test.describe('Simulation Performance Tests', () => {
     // Wait for WASM to load (it's loaded dynamically)
     await page.waitForTimeout(3000);
     
-    // Look for entity count input
-    const entityCountInput = page.locator('input[type="number"]').first();
+    // Look for entity count slider
+    const entityCountSlider = page.locator('input[type="range"]').first();
     
-    // Set entity count to 10000
-    await entityCountInput.fill('10000');
+    // Set entity count to max (1000 via slider)
+    await entityCountSlider.fill('1000');
     await page.waitForTimeout(500);
-    console.log('✓ Set entity count to 10,000');
+    console.log('✓ Set entity count to 1,000 (slider max)');
     
-    // Initialize simulation with new count (look for reset/init button)
-    const resetButton = page.locator('button').filter({ hasText: /Reset|Initialize/i }).first();
-    if (await resetButton.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await resetButton.click();
+    // Apply configuration
+    const applyButton = page.locator('button').filter({ hasText: /Apply Config/i }).first();
+    if (await applyButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await applyButton.click();
       await page.waitForTimeout(1000);
-      console.log('✓ Initialized simulation with 10,000 entities');
+      console.log('✓ Applied configuration');
     }
     
     // Start the simulation
-    const startButton = page.locator('button').filter({ hasText: /Start/i }).first();
+    const startButton = page.locator('button').filter({ hasText: /^Start$/i }).first();
     await startButton.click();
     await page.waitForTimeout(500);
     console.log('✓ Simulation started');
     
-    // Wait for simulation to run
+    // Wait for simulation to run and stabilize
     await page.waitForTimeout(5000);
     
-    // Monitor performance
-    const performanceMetrics = await page.evaluate(() => {
-      // Measure FPS by counting animation frames over 2 seconds
-      let frameCount = 0;
-      const startTime = performance.now();
-      const duration = 2000;
+    // Capture performance metrics from the UI
+    const performanceData = await page.evaluate(() => {
+      // Find performance metric elements
+      const metricsText = Array.from(document.querySelectorAll('.performance-metrics p'))
+        .map(el => el.textContent || '')
+        .join(' | ');
       
-      return new Promise<{
-        fps: number;
-        responsive: boolean;
-      }>(resolve => {
-        const countFrames = () => {
-          frameCount++;
-          if (performance.now() - startTime < duration) {
-            requestAnimationFrame(countFrames);
-          } else {
-            const fps = frameCount / (duration / 1000);
-            resolve({
-              fps: Math.round(fps * 10) / 10,
-              responsive: true,
-            });
-          }
-        };
-        requestAnimationFrame(countFrames);
+      // Extract tick rate
+      const tickRateMatch = metricsText.match(/Actual Tick Rate:\s*([\d.]+)\s*Hz/);
+      const actualTickRate = tickRateMatch ? parseFloat(tickRateMatch[1]) : 0;
+      
+      // Extract durations
+      const tickDurationMatch = metricsText.match(/Tick Duration:\s*([\d.]+)\s*ms/);
+      const tickDuration = tickDurationMatch ? parseFloat(tickDurationMatch[1]) : 0;
+      
+      const snapshotDurationMatch = metricsText.match(/Snapshot Time:\s*([\d.]+)\s*ms/);
+      const snapshotDuration = snapshotDurationMatch ? parseFloat(snapshotDurationMatch[1]) : 0;
+      
+      return {
+        actualTickRate,
+        tickDuration,
+        snapshotDuration,
+        totalFrameTime: tickDuration + snapshotDuration,
+        metricsText,
+      };
+    });
+    
+    console.log(`\n--- Performance Metrics (1000 entities) ---`);
+    console.log(`Actual Tick Rate: ${performanceData.actualTickRate.toFixed(1)} Hz`);
+    console.log(`Tick Duration: ${performanceData.tickDuration.toFixed(2)} ms`);
+    console.log(`Snapshot Serialization: ${performanceData.snapshotDuration.toFixed(2)} ms`);
+    console.log(`Total Frame Time: ${performanceData.totalFrameTime.toFixed(2)} ms`);
+    console.log(`Target: 60 Hz (16.67 ms/frame)`);
+    
+    // Verify the page is responsive (doesn't freeze)
+    const isResponsive = await page.evaluate(() => {
+      return new Promise<boolean>(resolve => {
+        let responsive = true;
+        const timeout = setTimeout(() => {
+          responsive = false;
+          resolve(responsive);
+        }, 100);
+        requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          resolve(responsive);
+        });
       });
     });
     
-    console.log(`\n--- Performance Metrics ---`);
-    console.log(`Measured FPS: ${performanceMetrics.fps}`);
-    console.log(`Page responsive: ${performanceMetrics.responsive}`);
+    expect(isResponsive).toBe(true);
+    console.log('✓ Page is responsive');
     
-    // Verify the page is responsive (doesn't freeze)
-    expect(performanceMetrics.responsive).toBe(true);
-    
-    // Verify reasonable FPS (at least 30 FPS for good user experience)
-    expect(performanceMetrics.fps).toBeGreaterThan(30);
-    
-    console.log(`✓ Page maintains good performance (${performanceMetrics.fps} FPS)`);
+    // Verify reasonable performance (at least 30 Hz for good UX)
+    expect(performanceData.actualTickRate).toBeGreaterThan(30);
+    console.log(`✓ Performance is acceptable (${performanceData.actualTickRate.toFixed(1)} Hz > 30 Hz)`);
     
     // Check tick counter is increasing
     const tickDisplay = page.locator('text=/Tick:?\\s*\\d+/i').first();
@@ -107,10 +124,132 @@ test.describe('Simulation Performance Tests', () => {
     console.log(`Tick progression: ${tickText1} → ${tickText2}`);
     
     // Take screenshot
-    await page.screenshot({ path: '/tmp/simulation-10k-entities.png', fullPage: true });
-    console.log('✓ Screenshot saved to /tmp/simulation-10k-entities.png');
+    await page.screenshot({ path: '/tmp/simulation-1k-entities.png', fullPage: true });
+    console.log('✓ Screenshot saved to /tmp/simulation-1k-entities.png');
+    
+    // Performance summary
+    const performanceRatio = (performanceData.actualTickRate / 60) * 100;
+    console.log(`\n--- Performance Summary ---`);
+    console.log(`Achieved: ${performanceRatio.toFixed(1)}% of 60 Hz target`);
+    
+    if (performanceData.snapshotDuration > 5) {
+      console.log(`⚠ Snapshot serialization is slow (${performanceData.snapshotDuration.toFixed(2)} ms)`);
+      console.log(`  This may indicate serialization overhead with large entity counts`);
+    }
+    
+    if (performanceData.tickDuration > 10) {
+      console.log(`⚠ Tick duration is high (${performanceData.tickDuration.toFixed(2)} ms)`);
+      console.log(`  This may indicate computation overhead in the simulation`);
+    }
     
     console.log('✓ Test completed successfully\n');
+  });
+  
+  test('should benchmark performance at different entity counts', async ({ page }) => {
+    console.log('\n=== E2E Benchmark: Performance Scaling ===');
+    
+    await page.goto('/simulation');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(3000);
+    
+    const entityCounts = [100, 250, 500, 1000];
+    const results: Array<{count: number, tickRate: number, tickTime: number, snapshotTime: number}> = [];
+    
+    for (const count of entityCounts) {
+      console.log(`\n--- Testing with ${count} entities ---`);
+      
+      // Set entity count
+      const slider = page.locator('input[type="range"]').first();
+      await slider.fill(count.toString());
+      await page.waitForTimeout(300);
+      
+      // Apply config
+      const applyButton = page.locator('button').filter({ hasText: /Apply Config/i }).first();
+      await applyButton.click();
+      await page.waitForTimeout(1000);
+      
+      // Start simulation
+      const startButton = page.locator('button').filter({ hasText: /^Start$/i }).first();
+      await startButton.click();
+      await page.waitForTimeout(3000); // Let it stabilize
+      
+      // Capture metrics
+      const metrics = await page.evaluate(() => {
+        const metricsText = Array.from(document.querySelectorAll('.performance-metrics p'))
+          .map(el => el.textContent || '')
+          .join(' | ');
+        
+        const tickRateMatch = metricsText.match(/Actual Tick Rate:\s*([\d.]+)\s*Hz/);
+        const tickDurationMatch = metricsText.match(/Tick Duration:\s*([\d.]+)\s*ms/);
+        const snapshotDurationMatch = metricsText.match(/Snapshot Time:\s*([\d.]+)\s*ms/);
+        
+        return {
+          tickRate: tickRateMatch ? parseFloat(tickRateMatch[1]) : 0,
+          tickTime: tickDurationMatch ? parseFloat(tickDurationMatch[1]) : 0,
+          snapshotTime: snapshotDurationMatch ? parseFloat(snapshotDurationMatch[1]) : 0,
+        };
+      });
+      
+      results.push({ count, ...metrics });
+      
+      console.log(`  Tick Rate: ${metrics.tickRate.toFixed(1)} Hz`);
+      console.log(`  Tick Time: ${metrics.tickTime.toFixed(2)} ms`);
+      console.log(`  Snapshot Time: ${metrics.snapshotTime.toFixed(2)} ms`);
+      console.log(`  Total: ${(metrics.tickTime + metrics.snapshotTime).toFixed(2)} ms`);
+      
+      // Pause for next test
+      const pauseButton = page.locator('button').filter({ hasText: /Pause/i }).first();
+      await pauseButton.click();
+      await page.waitForTimeout(500);
+    }
+    
+    // Print comparison table
+    console.log(`\n--- Performance Scaling Comparison ---`);
+    console.log('Entities | Tick Rate | Tick Time | Snapshot Time | Total Time');
+    console.log('---------|-----------|-----------|---------------|------------');
+    for (const result of results) {
+      const total = result.tickTime + result.snapshotTime;
+      console.log(
+        `${result.count.toString().padStart(8)} | ` +
+        `${result.tickRate.toFixed(1).padStart(9)} Hz | ` +
+        `${result.tickTime.toFixed(2).padStart(9)} ms | ` +
+        `${result.snapshotTime.toFixed(2).padStart(13)} ms | ` +
+        `${total.toFixed(2).padStart(10)} ms`
+      );
+    }
+    
+    // Analyze scaling
+    if (results.length >= 2) {
+      const first = results[0];
+      const last = results[results.length - 1];
+      const entityRatio = last.count / first.count;
+      const tickTimeRatio = last.tickTime / Math.max(first.tickTime, 0.1);
+      const snapshotTimeRatio = last.snapshotTime / Math.max(first.snapshotTime, 0.1);
+      
+      console.log(`\n--- Scaling Analysis (${first.count} → ${last.count} entities) ---`);
+      console.log(`Entity count increased: ${entityRatio.toFixed(1)}x`);
+      console.log(`Tick time increased: ${tickTimeRatio.toFixed(1)}x`);
+      console.log(`Snapshot time increased: ${snapshotTimeRatio.toFixed(1)}x`);
+      
+      if (tickTimeRatio > entityRatio * 1.5) {
+        console.log(`⚠ Tick time scaling is worse than linear (possible O(n²) behavior)`);
+      } else {
+        console.log(`✓ Tick time scaling is reasonable`);
+      }
+      
+      if (snapshotTimeRatio > entityRatio * 1.5) {
+        console.log(`⚠ Snapshot serialization scaling is worse than linear`);
+      } else {
+        console.log(`✓ Snapshot serialization scaling is reasonable`);
+      }
+    }
+    
+    console.log('\n✓ Benchmark completed\n');
+    
+    // Verify all tests met minimum performance
+    for (const result of results) {
+      expect(result.tickRate).toBeGreaterThan(20);
+    }
   });
   
   test('should display entity count and simulation controls', async ({ page }) => {

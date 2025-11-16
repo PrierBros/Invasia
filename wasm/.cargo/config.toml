@@ -1,0 +1,9 @@
+[build]
+# Keep the global build target unchanged; wasm builds will typically
+# specify `--target wasm32-unknown-unknown` explicitly. This section
+# just centralizes wasm-specific flags when that target is used.
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "target-feature=+simd128",
+]

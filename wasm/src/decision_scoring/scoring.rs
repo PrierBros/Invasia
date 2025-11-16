@@ -116,42 +116,42 @@ unsafe fn finalize_scores_batch_simd(
     let mut offset = 0;
     let mut chunks = components.chunks_exact(4);
     for chunk in chunks.by_ref() {
-        let delta_res = wasm32::f32x4_make(
+        let delta_res = transmute::<[f32; 4], _>([
             chunk[0].delta_res,
             chunk[1].delta_res,
             chunk[2].delta_res,
             chunk[3].delta_res,
-        );
-        let delta_sec = wasm32::f32x4_make(
+        ]);
+        let delta_sec = transmute::<[f32; 4], _>([
             chunk[0].delta_sec,
             chunk[1].delta_sec,
             chunk[2].delta_sec,
             chunk[3].delta_sec,
-        );
-        let delta_growth = wasm32::f32x4_make(
+        ]);
+        let delta_growth = transmute::<[f32; 4], _>([
             chunk[0].delta_growth,
             chunk[1].delta_growth,
             chunk[2].delta_growth,
             chunk[3].delta_growth,
-        );
-        let delta_pos = wasm32::f32x4_make(
+        ]);
+        let delta_pos = transmute::<[f32; 4], _>([
             chunk[0].delta_pos,
             chunk[1].delta_pos,
             chunk[2].delta_pos,
             chunk[3].delta_pos,
-        );
-        let cost = wasm32::f32x4_make(
+        ]);
+        let cost = transmute::<[f32; 4], _>([
             chunk[0].cost,
             chunk[1].cost,
             chunk[2].cost,
             chunk[3].cost,
-        );
-        let risk = wasm32::f32x4_make(
+        ]);
+        let risk = transmute::<[f32; 4], _>([
             chunk[0].risk,
             chunk[1].risk,
             chunk[2].risk,
             chunk[3].risk,
-        );
+        ]);
 
         let mut acc = wasm32::f32x4_mul(delta_res, w_res);
         acc = wasm32::f32x4_add(acc, wasm32::f32x4_mul(delta_sec, w_sec));
@@ -602,6 +602,26 @@ mod tests {
             assert_eq!(scalar_components.cost, batch_components.cost);
             assert_eq!(scalar_components.risk, batch_components.risk);
             assert!((scalar_score - batch.final_scores[idx]).abs() < 1e-4);
+        }
+    }
+}
+
+// Build-time guard: on wasm32, ensure simd128 is actually enabled so the
+// SIMD batch path is compiled in for CI wasm builds.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod simd_build_tests {
+    #[test]
+    fn wasm_simd128_is_enabled() {
+        // If this cfg arm compiles, we are on wasm32. Now assert that the
+        // simd128 feature is present; otherwise, fail loudly so CI catches it.
+        #[cfg(target_feature = "simd128")]
+        {
+            assert!(true);
+        }
+
+        #[cfg(not(target_feature = "simd128"))]
+        {
+            panic!("wasm32 build compiled without simd128; check .cargo/config.toml and CI flags");
         }
     }
 }
