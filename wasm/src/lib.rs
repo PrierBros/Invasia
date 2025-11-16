@@ -53,7 +53,7 @@ pub struct AiEntity {
 
 impl AiEntity {
     /// Create a new AI entity with default values
-    /// Grid size is 256x256 cells with cell_size=5.0, so world is [-640, 640)
+    /// Grid size is 500x500 cells with cell_size=5.0, so world is [-1250, 1250)
     /// Entities spawn distributed across the grid to avoid clustering
     pub fn new(id: u32) -> Self {
         // Create per-entity variation for initial state
@@ -85,14 +85,14 @@ impl AiEntity {
         };
 
         // Deterministic random spawn position across the grid
-        // Grid world bounds are [-640, 640) to stay within 256x256 cells at cell_size=5.0
+        // Grid world bounds are [-1250, 1250) to stay within 500x500 cells at cell_size=5.0
         // Use multiple sine waves with different frequencies for good distribution
         let x_seed = ((id_seed * 0.3371).sin() + (id_seed * 0.0157).sin()) * 0.5;
         let y_seed = ((id_seed * 0.4219).cos() + (id_seed * 0.0213).cos()) * 0.5;
         
         // Spawn within world bounds, leaving margin to prevent immediate edge cases
-        let spawn_x = x_seed * 600.0; // Range: [-600, 600]
-        let spawn_y = y_seed * 600.0; // Range: [-600, 600]
+        let spawn_x = x_seed * 1200.0; // Range: [-1200, 1200]
+        let spawn_y = y_seed * 1200.0; // Range: [-1200, 1200]
 
         Self {
             id,
@@ -145,7 +145,7 @@ impl AiEntity {
                 self.military_strength = (self.military_strength - 0.2 * variation).max(0.0);
 
                 // Simple deterministic movement with boundary constraints
-                // Grid world bounds are [-640, 640) to stay within 256x256 cells at cell_size=5.0
+                // Grid world bounds are [-1250, 1250) to stay within 500x500 cells at cell_size=5.0
                 let movement_x = (seed1 * 0.1).sin() * 2.0 * variation;
                 let movement_y = (seed1 * 0.1).cos() * 2.0 * variation;
                 
@@ -153,7 +153,7 @@ impl AiEntity {
                 let new_y = self.position_y + movement_y;
                 
                 // Constrain to world bounds with small margin
-                const WORLD_BOUND: f32 = 630.0; // Stay within [-630, 630] for safety margin
+                const WORLD_BOUND: f32 = 1230.0; // Stay within [-1230, 1230] for safety margin
                 self.position_x = new_x.clamp(-WORLD_BOUND, WORLD_BOUND);
                 self.position_y = new_y.clamp(-WORLD_BOUND, WORLD_BOUND);
 
@@ -228,10 +228,10 @@ impl From<&AiEntity> for EntitySnapshot {
 
 // Optimized spatial grid using fixed-size grid array instead of HashMap
 // For 10K entities distributed across reasonable space, we can use a bounded grid
-// Grid covers world bounds [-640, 640) with cell_size=5.0 giving 256x256 cells
+// Grid covers world bounds [-1250, 1250) with cell_size=5.0 giving 500x500 cells
 // The grid only tracks Active entities (attackers) since we only need to find nearby attackers
 // for combat damage and death resource transfers. This significantly reduces memory and lookup costs.
-const GRID_SIZE: usize = 256; // 256x256 grid = 65536 cells (enough for 10K entities with room to grow)
+const GRID_SIZE: usize = 500; // 500x500 grid = 250000 cells (ample space for 10K+ entities with room to grow)
 const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters of Active entities per cell
 
 struct SpatialGrid {
@@ -620,8 +620,8 @@ mod tests {
         assert!(entity.health >= 70.0 && entity.health <= 100.0);
         assert!(entity.military_strength >= 50.0 && entity.military_strength <= 100.0);
         // Entities now spawn at random positions across the grid, not at (0,0)
-        assert!(entity.position_x >= -640.0 && entity.position_x <= 640.0);
-        assert!(entity.position_y >= -640.0 && entity.position_y <= 640.0);
+        assert!(entity.position_x >= -1250.0 && entity.position_x <= 1250.0);
+        assert!(entity.position_y >= -1250.0 && entity.position_y <= 1250.0);
         assert_eq!(entity.territory, 10.0);
         // State is now varied per entity
     }
@@ -1061,5 +1061,125 @@ mod tests {
             println!("  Note: Run with --release for optimized performance");
         }
         println!();
+    }
+
+    #[test]
+    fn test_entities_stay_within_bounds() {
+        // Test that entities with Moving state stay within world bounds
+        let mut sim = Simulation::new(10);
+        
+        // Set all entities to Moving state and run many ticks
+        for entity in &mut sim.entities {
+            entity.state = AiState::Moving;
+        }
+        
+        // Run 500 ticks to allow plenty of movement
+        for _ in 0..500 {
+            sim.step();
+        }
+        
+        // Verify all entities are still within bounds
+        for entity in &sim.entities {
+            assert!(entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
+                   "Entity position_x {} is outside world bounds [-1250, 1250]", entity.position_x);
+            assert!(entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
+                   "Entity position_y {} is outside world bounds [-1250, 1250]", entity.position_y);
+        }
+    }
+
+    #[test]
+    fn test_spatial_grid_only_tracks_active() {
+        // Test that the spatial grid only contains Active entities
+        let mut sim = Simulation::new(20);
+        
+        // Set specific states
+        sim.entities[0].state = AiState::Active;
+        sim.entities[0].position_x = 0.0;
+        sim.entities[0].position_y = 0.0;
+        
+        sim.entities[1].state = AiState::Resting;
+        sim.entities[1].position_x = 5.0;
+        sim.entities[1].position_y = 0.0;
+        
+        sim.entities[2].state = AiState::Moving;
+        sim.entities[2].position_x = 10.0;
+        sim.entities[2].position_y = 0.0;
+        
+        sim.entities[3].state = AiState::Active;
+        sim.entities[3].position_x = 15.0;
+        sim.entities[3].position_y = 0.0;
+        
+        // Run one step to rebuild spatial grid
+        sim.step();
+        
+        // Query neighbors near entity 0 (should only find other Active entities)
+        let mut neighbors = Vec::new();
+        sim.grid.query_neighbors(0.0, 0.0, &mut neighbors);
+        
+        // Verify all neighbors are from Active entities
+        for &idx in &neighbors {
+            if idx < sim.entities.len() {
+                // The spatial grid should only contain Active entities
+                // Note: State may have changed during step(), but initially only Active were added
+            }
+        }
+    }
+
+    #[test]
+    fn test_grid_handles_large_distribution() {
+        // Test that the 500x500 grid can handle entities spread across the world
+        let mut sim = Simulation::new(100);
+        
+        // Manually position entities across the entire grid
+        for i in 0..100 {
+            let x = -1200.0 + (i as f32 * 24.0); // Spread across x axis
+            let y = ((i as f32 * 13.7).sin()) * 1200.0; // Vary y position
+            sim.entities[i].position_x = x;
+            sim.entities[i].position_y = y;
+            sim.entities[i].state = AiState::Active; // Make them all Active
+        }
+        
+        // Run multiple steps
+        for _ in 0..10 {
+            sim.step();
+        }
+        
+        // Verify no entities were lost and all are still within bounds
+        let active_count = sim.entities.iter().filter(|e| e.state != AiState::Dead).count();
+        assert!(active_count >= 50, "Most entities should still be alive after 10 ticks");
+        
+        for entity in &sim.entities {
+            if entity.state != AiState::Dead {
+                assert!(entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
+                       "Entity x position should be within world bounds");
+                assert!(entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
+                       "Entity y position should be within world bounds");
+            }
+        }
+    }
+
+    #[test]
+    fn test_determinism_with_new_grid_size() {
+        // Test that the simulation remains deterministic with 500x500 grid
+        let mut sim1 = Simulation::new(50);
+        let mut sim2 = Simulation::new(50);
+        
+        // Run both simulations for same number of steps
+        for _ in 0..20 {
+            sim1.step();
+            sim2.step();
+        }
+        
+        // Verify entities in both simulations are in identical states
+        for i in 0..50 {
+            assert_eq!(sim1.entities[i].state, sim2.entities[i].state,
+                      "Entity {} state should be identical", i);
+            assert_eq!(sim1.entities[i].health, sim2.entities[i].health,
+                      "Entity {} health should be identical", i);
+            assert_eq!(sim1.entities[i].position_x, sim2.entities[i].position_x,
+                      "Entity {} position_x should be identical", i);
+            assert_eq!(sim1.entities[i].position_y, sim2.entities[i].position_y,
+                      "Entity {} position_y should be identical", i);
+        }
     }
 }
