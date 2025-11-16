@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 // AI Decision Scoring System modules
@@ -102,13 +101,16 @@ impl AiEntity {
         entity_snapshots: &[EntitySnapshot],
         neighbor_indices: &[usize],
     ) {
+        // Early return for dead entities
+        if self.state == AiState::Dead {
+            return;
+        }
+        
         // Deterministic update logic based on tick and entity id
-        // Use a better pseudo-random variation that's unique per entity
         let seed1 = (tick.wrapping_mul(1000) + self.id as u64) as f32;
         let seed2 = (tick.wrapping_mul(7919) + self.id.wrapping_mul(6547) as u64) as f32;
 
         // Create entity-specific variation factors (0.5 to 1.5 range)
-        // Use different multipliers for better spread
         let id_factor = ((self.id as f32 * 0.7321).sin() + 1.0) / 2.0 + 0.5;
         let tick_factor = ((seed2 * 0.00123).cos() + 1.0) / 2.0 + 0.5;
         let variation = id_factor * tick_factor;
@@ -116,25 +118,18 @@ impl AiEntity {
         // Military strength dynamics with per-entity variation
         match self.state {
             AiState::Active => {
-                // Active state: Attack nearby entities
                 self.military_strength = (self.military_strength - 0.3 * variation).max(0.0);
-
-                // Entities in Active state deal damage to nearby entities
-                // (damage is calculated and applied in the combat damage section below)
-
                 if self.military_strength < 20.0 {
                     self.state = AiState::Resting;
                 }
             }
             AiState::Resting => {
-                // Resting state: Rebuild military strength
                 self.military_strength = (self.military_strength + 1.0 * variation).min(100.0);
                 if self.military_strength > 80.0 {
                     self.state = AiState::Moving;
                 }
             }
             AiState::Moving => {
-                // Moving state: Attempt expansion
                 self.military_strength = (self.military_strength - 0.2 * variation).max(0.0);
 
                 // Simple deterministic movement
@@ -158,7 +153,6 @@ impl AiEntity {
                 }
             }
             AiState::Dead => {
-                // Already handled above, but include for completeness
                 return;
             }
         }
@@ -167,13 +161,13 @@ impl AiEntity {
         let mut total_damage = 0.0;
         for &other_index in neighbor_indices {
             let other = &entity_snapshots[other_index];
-            if other.id != self.id && other.state == AiState::Active {
+            if other.state == AiState::Active {
                 let dx = self.position_x - other.position_x;
                 let dy = self.position_y - other.position_y;
-                let distance = (dx * dx + dy * dy).sqrt();
+                let dist_sq = dx * dx + dy * dy;
 
-                // Take damage from nearby attackers
-                if distance < 10.0 && distance > 0.1 {
+                // Use squared distance to avoid sqrt in hot loop
+                if dist_sq < 100.0 && dist_sq > 0.01 {  // 10.0^2 = 100.0, 0.1^2 = 0.01
                     let damage = (other.military_strength / 100.0) * 0.5 * variation;
                     total_damage += damage;
                 }
@@ -183,10 +177,8 @@ impl AiEntity {
         // Apply damage to health
         if total_damage > 0.0 {
             self.health = (self.health - total_damage).max(0.0);
-        }
-
-        // Health regeneration with variation (slower than before, and not during combat)
-        if self.health < 100.0 && total_damage == 0.0 {
+        } else if self.health < 100.0 {
+            // Health regeneration with variation (only when not in combat)
             self.health = (self.health + 0.05 * variation).min(100.0);
         }
     }
@@ -213,23 +205,40 @@ impl From<&AiEntity> for EntitySnapshot {
     }
 }
 
+// Optimized spatial grid using fixed-size grid array instead of HashMap
+// For 10K entities distributed across reasonable space, we can use a bounded grid
+const GRID_SIZE: usize = 128; // 128x128 grid = 16384 cells
+const MAX_ENTITIES_PER_CELL: usize = 64; // Maximum entities per cell
+
 struct SpatialGrid {
     cell_size: f32,
     search_radius: f32,
-    cells: HashMap<(i32, i32), Vec<usize>>,
+    // Fixed-size grid: each cell stores indices and count
+    cells: Vec<([usize; MAX_ENTITIES_PER_CELL], usize)>,
+    grid_min: (i32, i32),
+    grid_max: (i32, i32),
 }
 
 impl SpatialGrid {
     fn new(cell_size: f32, search_radius: f32) -> Self {
+        let capacity = GRID_SIZE * GRID_SIZE;
+        let mut cells = Vec::with_capacity(capacity);
+        cells.resize(capacity, ([0; MAX_ENTITIES_PER_CELL], 0));
+        
         Self {
             cell_size,
             search_radius,
-            cells: HashMap::new(),
+            cells,
+            grid_min: (-(GRID_SIZE as i32 / 2), -(GRID_SIZE as i32 / 2)),
+            grid_max: (GRID_SIZE as i32 / 2, GRID_SIZE as i32 / 2),
         }
     }
 
     fn clear(&mut self) {
-        self.cells.clear();
+        // Fast clear: just reset counts
+        for cell in &mut self.cells {
+            cell.1 = 0;
+        }
     }
 
     fn cell_coords(&self, x: f32, y: f32) -> (i32, i32) {
@@ -237,12 +246,27 @@ impl SpatialGrid {
         let cy = (y / self.cell_size).floor() as i32;
         (cx, cy)
     }
+    
+    fn cell_index(&self, cx: i32, cy: i32) -> Option<usize> {
+        if cx < self.grid_min.0 || cx >= self.grid_max.0 || cy < self.grid_min.1 || cy >= self.grid_max.1 {
+            return None;
+        }
+        let x = (cx - self.grid_min.0) as usize;
+        let y = (cy - self.grid_min.1) as usize;
+        Some(y * GRID_SIZE + x)
+    }
 
     fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
         self.clear();
         for (index, entity) in snapshots.iter().enumerate() {
             let coords = self.cell_coords(entity.position_x, entity.position_y);
-            self.cells.entry(coords).or_default().push(index);
+            if let Some(cell_idx) = self.cell_index(coords.0, coords.1) {
+                let cell = &mut self.cells[cell_idx];
+                if cell.1 < MAX_ENTITIES_PER_CELL {
+                    cell.0[cell.1] = index;
+                    cell.1 += 1;
+                }
+            }
         }
     }
 
@@ -251,8 +275,9 @@ impl SpatialGrid {
         let range = (self.search_radius / self.cell_size).ceil() as i32;
         for dx in -range..=range {
             for dy in -range..=range {
-                if let Some(indices) = self.cells.get(&(cx + dx, cy + dy)) {
-                    buffer.extend(indices.iter().copied());
+                if let Some(cell_idx) = self.cell_index(cx + dx, cy + dy) {
+                    let cell = &self.cells[cell_idx];
+                    buffer.extend_from_slice(&cell.0[..cell.1]);
                 }
             }
         }
@@ -268,6 +293,12 @@ pub struct Simulation {
     entity_count: usize,
     tick_rate: u32,
     grid: SpatialGrid,
+    // Pre-allocated reusable buffers to avoid allocations in hot path
+    neighbor_buffer: Vec<usize>,
+    snapshot_buffer: Vec<EntitySnapshot>,
+    // Buffers for death/resource processing
+    resource_transfers: Vec<(u32, f32, f32)>,
+    dead_ids: Vec<u32>,
 }
 
 #[wasm_bindgen]
@@ -287,6 +318,10 @@ impl Simulation {
             entity_count,
             tick_rate: 60, // Default 60 ticks per second
             grid: SpatialGrid::new(5.0, 10.0),
+            neighbor_buffer: Vec::with_capacity(256), // Pre-allocate for neighbors
+            snapshot_buffer: Vec::with_capacity(entity_count),
+            resource_transfers: Vec::with_capacity(128),
+            dead_ids: Vec::with_capacity(128),
         }
     }
 
@@ -323,6 +358,10 @@ impl Simulation {
         self.running = false;
         self.entities.clear();
         self.grid.clear();
+        self.neighbor_buffer.clear();
+        self.snapshot_buffer.clear();
+        self.resource_transfers.clear();
+        self.dead_ids.clear();
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
@@ -333,64 +372,76 @@ impl Simulation {
     pub fn step(&mut self) {
         self.tick = self.tick.wrapping_add(1);
 
-        let snapshots: Vec<EntitySnapshot> =
-            self.entities.iter().map(EntitySnapshot::from).collect();
+        // Reuse snapshot buffer
+        self.snapshot_buffer.clear();
+        self.snapshot_buffer.extend(self.entities.iter().map(EntitySnapshot::from));
 
-        self.grid.rebuild(&snapshots);
+        self.grid.rebuild(&self.snapshot_buffer);
 
-        let mut neighbor_indices = Vec::new();
+        // Update entities using pre-allocated neighbor buffer
         for i in 0..self.entities.len() {
-            neighbor_indices.clear();
-            let entity_snapshot = snapshots[i];
+            self.neighbor_buffer.clear();
+            let entity_snapshot = self.snapshot_buffer[i];
             self.grid.query_neighbors(
                 entity_snapshot.position_x,
                 entity_snapshot.position_y,
-                &mut neighbor_indices,
+                &mut self.neighbor_buffer,
             );
-            neighbor_indices.retain(|&index| index != i);
+            self.neighbor_buffer.retain(|&index| index != i);
 
             let entity = &mut self.entities[i];
-            entity.update(self.tick, &snapshots, &neighbor_indices);
+            entity.update(self.tick, &self.snapshot_buffer, &self.neighbor_buffer);
         }
         
-        // Process deaths and transfer resources
-        // Collect information about deaths and who should receive resources
-        let mut resource_transfers: Vec<(u32, f32, f32)> = Vec::new(); // (attacker_id, military_strength, money)
-        let mut dead_ids: Vec<u32> = Vec::new();
+        // Process deaths and transfer resources using pre-allocated buffers
+        // Optimized single-pass approach
+        self.resource_transfers.clear();
+        self.dead_ids.clear();
         
+        // Single pass to identify dead entities and their resources
         for entity in &self.entities {
             if entity.health <= 0.0 && entity.state != AiState::Dead {
-                let military_strength = entity.military_strength;
-                let money = entity.money;
+                self.dead_ids.push(entity.id);
                 
-                // Find nearest Active attacker
-                let mut nearest_attacker_id: Option<u32> = None;
-                let mut nearest_distance = f32::INFINITY;
-                
-                for other in &self.entities {
-                    if other.id != entity.id && other.state == AiState::Active {
-                        let dx = entity.position_x - other.position_x;
-                        let dy = entity.position_y - other.position_y;
-                        let distance = (dx * dx + dy * dy).sqrt();
-                        
-                        if distance < nearest_distance {
-                            nearest_distance = distance;
-                            nearest_attacker_id = Some(other.id);
+                // Find nearest Active attacker (only if there are resources to transfer)
+                if entity.military_strength > 0.0 || entity.money > 0.0 {
+                    let mut nearest_attacker_id: Option<u32> = None;
+                    let mut nearest_distance = f32::INFINITY;
+                    
+                    // Use spatial grid to find nearby attackers more efficiently
+                    self.neighbor_buffer.clear();
+                    self.grid.query_neighbors(
+                        entity.position_x,
+                        entity.position_y,
+                        &mut self.neighbor_buffer,
+                    );
+                    
+                    for &idx in &self.neighbor_buffer {
+                        let other = &self.entities[idx];
+                        if other.id != entity.id && other.state == AiState::Active {
+                            let dx = entity.position_x - other.position_x;
+                            let dy = entity.position_y - other.position_y;
+                            let distance = (dx * dx + dy * dy).sqrt();
+                            
+                            if distance < nearest_distance {
+                                nearest_distance = distance;
+                                nearest_attacker_id = Some(other.id);
+                            }
                         }
                     }
+                    
+                    // Record transfer if attacker found
+                    if let Some(attacker_id) = nearest_attacker_id {
+                        self.resource_transfers.push((attacker_id, entity.military_strength, entity.money));
+                    }
                 }
-                
-                // Record transfer if attacker found
-                if let Some(attacker_id) = nearest_attacker_id {
-                    resource_transfers.push((attacker_id, military_strength, money));
-                }
-                
-                dead_ids.push(entity.id);
             }
         }
         
-        // Apply resource transfers to attackers
-        for (attacker_id, military_strength, money) in resource_transfers {
+        // Apply resource transfers to attackers (optimized lookup)
+        for &(attacker_id, military_strength, money) in &self.resource_transfers {
+            // Direct index lookup would be faster but entities don't store their index
+            // For now, keep the find but it's only done for actual transfers
             if let Some(attacker) = self.entities.iter_mut().find(|e| e.id == attacker_id) {
                 attacker.military_strength += military_strength;
                 attacker.money += money;
@@ -398,7 +449,7 @@ impl Simulation {
         }
         
         // Set dead entities to terminal state with all values at zero
-        for dead_id in dead_ids {
+        for &dead_id in &self.dead_ids {
             if let Some(dead_entity) = self.entities.iter_mut().find(|e| e.id == dead_id) {
                 dead_entity.state = AiState::Dead;
                 dead_entity.health = 0.0;
@@ -467,6 +518,10 @@ impl Simulation {
         self.entities.clear();
         self.tick = 0;
         self.grid.clear();
+        self.neighbor_buffer.clear();
+        self.snapshot_buffer.clear();
+        self.resource_transfers.clear();
+        self.dead_ids.clear();
     }
 }
 
