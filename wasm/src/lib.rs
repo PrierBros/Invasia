@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     #[ignore] // This is a performance benchmark test - run with: cargo test -- --ignored
-    fn test_benchmark_10000_elements_at_240hz() {
+    fn test_benchmark_10000_elements) {
         use std::time::Instant;
         
         const ENTITY_COUNT: usize = 10_000;
