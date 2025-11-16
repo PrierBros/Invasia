@@ -41,6 +41,9 @@
   // Update loop
   let updateInterval: number | null = null;
   let renderInterval: number | null = null;
+  
+  // Filter state
+  let hideDeadAIs: boolean = false;
 
   // Load the WASM module on component mount
   onMount(async () => {
@@ -168,6 +171,11 @@
   function formatNumber(num: number): string {
     return num.toFixed(2);
   }
+  
+  // Filtered entities based on hideDeadAIs state
+  $: filteredEntities = hideDeadAIs 
+    ? entities.filter(entity => getStateName(entity.state) !== 'Dead')
+    : entities;
 </script>
 
 <div class="simulation-container">
@@ -271,6 +279,13 @@
       <p><strong>Tick:</strong> {tick}</p>
       <p><strong>Entities:</strong> {entities.length}</p>
       <p><strong>Status:</strong> {isRunning ? '🟢 Running' : '🔴 Paused'}</p>
+      <label class="filter-checkbox">
+        <input 
+          type="checkbox" 
+          bind:checked={hideDeadAIs}
+        />
+        <span>Hide Dead AIs</span>
+      </label>
     </div>
   </div>
 
@@ -289,7 +304,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each entities as entity (entity.id)}
+        {#each filteredEntities as entity (entity.id)}
           <tr>
             <td>{entity.id}</td>
             <td class="health-cell">
@@ -422,6 +437,26 @@
     margin: 0;
     font-size: 0.875rem;
     color: #555;
+  }
+
+  .filter-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #555;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .filter-checkbox input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+  }
+
+  .filter-checkbox span {
+    font-weight: 500;
   }
 
   .btn {
