@@ -80,7 +80,8 @@ impl WorldState {
     
     /// Update all countries' threat indices incrementally
     pub fn update_threat_indices(&mut self, luts: &LookupTables) {
-        let country_ids: Vec<u32> = self.countries.keys().copied().collect();
+        let mut country_ids: Vec<u32> = self.countries.keys().copied().collect();
+        country_ids.sort(); // Ensure deterministic order
         
         for &id in &country_ids {
             if let Some(country) = self.countries.get(&id) {
@@ -193,7 +194,8 @@ impl DecisionSystem {
         self.world.update_threat_indices(&self.luts);
         
         // 3-5. Build shortlist, score, and choose for each country
-        let country_ids: Vec<u32> = self.world.countries().keys().copied().collect();
+        let mut country_ids: Vec<u32> = self.world.countries().keys().copied().collect();
+        country_ids.sort(); // Ensure deterministic order
         let mut decisions: HashMap<u32, (Action, f32, ScoreComponents)> = HashMap::new();
         
         for country_id in country_ids {
