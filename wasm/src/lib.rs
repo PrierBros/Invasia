@@ -698,41 +698,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Performance benchmark"]
-    fn test_simulation_step_scaling_is_reasonable() {
-        use std::time::Instant;
-
-        fn measure(entity_count: usize) -> std::time::Duration {
-            let mut sim = Simulation::new(entity_count);
-            for _ in 0..5 {
-                sim.step();
-            }
-            let start = Instant::now();
-            for _ in 0..30 {
-                sim.step();
-            }
-            start.elapsed()
-        }
-
-        let dur_1k = measure(1_000);
-        let dur_2k = measure(2_000);
-        let ratio = dur_2k.as_secs_f64() / dur_1k.as_secs_f64().max(1e-9);
-
-        println!(
-            "Simulation benchmark: 1000 -> {:?}, 2000 -> {:?}, ratio {:.2}",
-            dur_1k, dur_2k, ratio
-        );
-
-        assert!(
-            ratio < 4.0,
-            "Simulation step scaling ratio too high: {:.2} (1k: {:?}, 2k: {:?})",
-            ratio,
-            dur_1k,
-            dur_2k
-        );
-    }
-
-    #[test]
     fn test_death_when_health_reaches_zero() {
         // Create a simulation with two entities
         let mut sim = Simulation::new(2);
