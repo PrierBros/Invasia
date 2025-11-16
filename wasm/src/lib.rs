@@ -179,19 +179,21 @@ impl AiEntity {
         }
 
         // Apply combat damage from nearby Active entities
+        // Note: All neighbors from spatial grid are Active entities
         let mut total_damage = 0.0;
         for &other_index in neighbor_indices {
             let other = &entity_snapshots[other_index];
-            if other.state == AiState::Active {
-                let dx = self.position_x - other.position_x;
-                let dy = self.position_y - other.position_y;
-                let dist_sq = dx * dx + dy * dy;
+            // Spatial grid only contains Active entities, so no need to check state
+            debug_assert_eq!(other.state, AiState::Active, "Spatial grid should only contain Active entities");
+            
+            let dx = self.position_x - other.position_x;
+            let dy = self.position_y - other.position_y;
+            let dist_sq = dx * dx + dy * dy;
 
-                // Use squared distance to avoid sqrt in hot loop
-                if dist_sq < 100.0 && dist_sq > 0.01 {  // 10.0^2 = 100.0, 0.1^2 = 0.01
-                    let damage = (other.military_strength / 100.0) * 0.5 * variation;
-                    total_damage += damage;
-                }
+            // Use squared distance to avoid sqrt in hot loop
+            if dist_sq < 100.0 && dist_sq > 0.01 {  // 10.0^2 = 100.0, 0.1^2 = 0.01
+                let damage = (other.military_strength / 100.0) * 0.5 * variation;
+                total_damage += damage;
             }
         }
 
@@ -227,10 +229,10 @@ impl From<&AiEntity> for EntitySnapshot {
 // Optimized spatial grid using fixed-size grid array instead of HashMap
 // For 10K entities distributed across reasonable space, we can use a bounded grid
 // Grid covers world bounds [-640, 640) with cell_size=5.0 giving 256x256 cells
-// With ~65K cells and 10K entities, each AI can occupy multiple cells for their territory
-// MAX_ENTITIES_PER_CELL represents how many entities can share a single cell position
+// The grid only tracks Active entities (attackers) since we only need to find nearby attackers
+// for combat damage and death resource transfers. This significantly reduces memory and lookup costs.
 const GRID_SIZE: usize = 256; // 256x256 grid = 65536 cells (enough for 10K entities with room to grow)
-const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters but prevent single-cell overflow
+const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters of Active entities per cell
 
 struct SpatialGrid {
     cell_size: f32,
@@ -283,7 +285,13 @@ impl SpatialGrid {
 
     fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
         self.clear();
+        // Only track Active entities (attackers) in the spatial grid
+        // since we only care about finding nearby attackers for combat and death processing
         for (index, entity) in snapshots.iter().enumerate() {
+            if entity.state != AiState::Active {
+                continue; // Skip non-Active entities
+            }
+            
             let coords = self.cell_coords(entity.position_x, entity.position_y);
             if let Some(cell_idx) = self.cell_index(coords.0, coords.1) {
                 let cell = &mut self.cells[cell_idx];
@@ -297,8 +305,8 @@ impl SpatialGrid {
                     #[cfg(debug_assertions)]
                     {
                         eprintln!(
-                            "Warning: Spatial grid cell at ({}, {}) is full (max {} entities). \
-                             Entity {} at ({:.2}, {:.2}) dropped. Total overflow: {}",
+                            "Warning: Spatial grid cell at ({}, {}) is full (max {} Active entities). \
+                             Active entity {} at ({:.2}, {:.2}) dropped. Total overflow: {}",
                             coords.0, coords.1, MAX_ENTITIES_PER_CELL,
                             index, entity.position_x, entity.position_y,
                             self.overflow_count
@@ -313,7 +321,7 @@ impl SpatialGrid {
         {
             if self.overflow_count > 0 {
                 eprintln!(
-                    "Spatial grid rebuild complete. {} entities couldn't be added due to cell capacity limits.",
+                    "Spatial grid rebuild complete. {} Active entities couldn't be added due to cell capacity limits.",
                     self.overflow_count
                 );
             }
@@ -490,15 +498,16 @@ impl Simulation {
                             debug_assert!(idx < self.entities.len());
                             let other = unsafe { self.entities.get_unchecked(idx) };
                             
-                            if other.state == AiState::Active {
-                                let dx = entity.position_x - other.position_x;
-                                let dy = entity.position_y - other.position_y;
-                                let dist_sq = dx * dx + dy * dy;
-                                
-                                if dist_sq < nearest_dist_sq {
-                                    nearest_dist_sq = dist_sq;
-                                    nearest_attacker_idx = Some(idx);
-                                }
+                            // Spatial grid only contains Active entities, so no need to check state
+                            debug_assert_eq!(other.state, AiState::Active, "Spatial grid should only contain Active entities");
+                            
+                            let dx = entity.position_x - other.position_x;
+                            let dy = entity.position_y - other.position_y;
+                            let dist_sq = dx * dx + dy * dy;
+                            
+                            if dist_sq < nearest_dist_sq {
+                                nearest_dist_sq = dist_sq;
+                                nearest_attacker_idx = Some(idx);
                             }
                         }
                     }
