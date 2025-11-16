@@ -277,7 +277,7 @@
 
     <div class="stats">
       <p><strong>Tick:</strong> {tick}</p>
-      <p><strong>Entities:</strong> {entities.length}</p>
+      <p><strong>Entities:</strong> {filteredEntities.length}{#if hideDeadAIs} / {entities.length}{/if}</p>
       <p><strong>Status:</strong> {isRunning ? '🟢 Running' : '🔴 Paused'}</p>
       <label class="filter-checkbox">
         <input 

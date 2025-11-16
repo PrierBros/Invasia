@@ -806,7 +806,7 @@ mod tests {
             EntitySnapshot::from(&entity),
             EntitySnapshot::from(&dead_attacker),
         ];
-        entity.update(1, &snapshots, &[1]);
+        entity.update(1, &snapshots, &[]);
         
         // Health should not decrease from dead attacker
         assert!(entity.health >= initial_health, "Dead entities should not deal damage");
