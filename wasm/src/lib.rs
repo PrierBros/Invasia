@@ -284,7 +284,7 @@ impl Simulation {
                 let mut nearest_distance = f32::INFINITY;
                 
                 for other in &self.entities {
-                    if other.id != entity.id && other.state == AiState::Active && other.state != AiState::Dead {
+                    if other.id != entity.id && other.state == AiState::Active {
                         let dx = entity.position_x - other.position_x;
                         let dy = entity.position_y - other.position_y;
                         let distance = (dx * dx + dy * dy).sqrt();
