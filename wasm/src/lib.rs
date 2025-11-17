@@ -17,7 +17,11 @@ fn performance_now() -> f64 {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn performance_now() -> f64 {
-    0.0
+    use std::time::Instant;
+    thread_local! {
+        static START: Instant = Instant::now();
+    }
+    START.with(|start| start.elapsed().as_secs_f64() * 1000.0)
 }
 
 // AI Decision Scoring System modules
@@ -671,7 +675,7 @@ impl Simulation {
         self.flat_snapshot_dirty = true;
 
         let end = performance_now();
-        if start > 0.0 && end >= start {
+        if end >= start {
             self.last_tick_duration_ms = end - start;
         }
     }
@@ -748,7 +752,7 @@ impl Simulation {
         let start = performance_now();
         self.ensure_flat_snapshot_ready();
         let end = performance_now();
-        if start > 0.0 && end >= start {
+        if end >= start {
             self.last_snapshot_duration_ms = end - start;
         }
         unsafe { Float32Array::view(&self.flat_snapshot) }
