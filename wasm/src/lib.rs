@@ -340,6 +340,19 @@ impl Simulation {
 // for combat damage and death resource transfers. This significantly reduces memory and lookup costs.
 const GRID_SIZE: usize = 500; // 500x500 grid = 250000 cells (ample space for 10K+ entities with room to grow)
 const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters of Active entities per cell
+const CELL_SIZE: f32 = 5.0;
+const SEARCH_RADIUS: f32 = 10.0;
+
+// Pre-computed neighbor offsets at compile time
+// With CELL_SIZE=5.0 and SEARCH_RADIUS=10.0, range = ceil(10.0/5.0) = 2
+// This gives us all offsets in the range [-2, 2] for both x and y
+const NEIGHBOR_OFFSETS: [(i32, i32); 25] = [
+    (-2, -2), (-2, -1), (-2, 0), (-2, 1), (-2, 2),
+    (-1, -2), (-1, -1), (-1, 0), (-1, 1), (-1, 2),
+    (0, -2), (0, -1), (0, 0), (0, 1), (0, 2),
+    (1, -2), (1, -1), (1, 0), (1, 1), (1, 2),
+    (2, -2), (2, -1), (2, 0), (2, 1), (2, 2),
+];
 
 struct SpatialGrid {
     cell_size: f32,
@@ -349,7 +362,6 @@ struct SpatialGrid {
     grid_min: (i32, i32),
     grid_max: (i32, i32),
     overflow_count: usize, // Track how many entities couldn't be added due to cell capacity
-    neighbor_offsets: Vec<(i32, i32)>,
 }
 
 impl SpatialGrid {
@@ -358,14 +370,6 @@ impl SpatialGrid {
         let mut cells = Vec::with_capacity(capacity);
         cells.resize(capacity, ([0; MAX_ENTITIES_PER_CELL], 0));
 
-        let range = (search_radius / cell_size).ceil() as i32;
-        let mut neighbor_offsets = Vec::with_capacity(((range * 2) + 1).pow(2) as usize);
-        for dx in -range..=range {
-            for dy in -range..=range {
-                neighbor_offsets.push((dx, dy));
-            }
-        }
-
         Self {
             cell_size,
             _search_radius: search_radius,
@@ -373,7 +377,6 @@ impl SpatialGrid {
             grid_min: (-(GRID_SIZE as i32 / 2), -(GRID_SIZE as i32 / 2)),
             grid_max: (GRID_SIZE as i32 / 2, GRID_SIZE as i32 / 2),
             overflow_count: 0,
-            neighbor_offsets,
         }
     }
 
@@ -454,7 +457,7 @@ impl SpatialGrid {
         F: FnMut(usize),
     {
         let (cx, cy) = self.cell_coords(x, y);
-        for &(dx, dy) in &self.neighbor_offsets {
+        for &(dx, dy) in &NEIGHBOR_OFFSETS {
             if let Some(cell_idx) = self.cell_index(cx + dx, cy + dy) {
                 let cell = &self.cells[cell_idx];
                 for &entity_idx in &cell.0[..cell.1] {
@@ -502,7 +505,7 @@ impl Simulation {
             running: false,
             entity_count,
             tick_rate: 60, // Default 60 ticks per second
-            grid: SpatialGrid::new(5.0, 10.0),
+            grid: SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS),
             snapshot_buffer: Vec::with_capacity(entity_count),
             resource_transfers: Vec::with_capacity(128),
             dead_indices: Vec::with_capacity(128),
@@ -804,7 +807,7 @@ mod tests {
         let mut entity = AiEntity::new(0);
         let snapshot = EntitySnapshot::from(&entity);
         let snapshots = vec![snapshot];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity.update(1, 0, snapshot, &snapshots, &grid);
         // Military strength should change after update (may increase or decrease depending on state)
@@ -923,7 +926,7 @@ mod tests {
         }
 
         let snapshots: Vec<EntitySnapshot> = entities.iter().map(EntitySnapshot::from).collect();
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
 
         // Update all entities for the same tick using spatial grid neighbors
@@ -989,7 +992,7 @@ mod tests {
             EntitySnapshot::from(&entity1),
             EntitySnapshot::from(&entity2),
         ];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity1.update(1, 0, snapshots[0], &snapshots, &grid);
 
@@ -1013,7 +1016,7 @@ mod tests {
         // Update entity (alone, no combat)
         let snapshot = EntitySnapshot::from(&entity);
         let snapshots = vec![snapshot];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity.update(1, 0, snapshot, &snapshots, &grid);
 
@@ -1036,7 +1039,7 @@ mod tests {
         // Update with no nearby entities
         let snapshot = EntitySnapshot::from(&entity);
         let snapshots = vec![snapshot];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity.update(1, 0, snapshot, &snapshots, &grid);
 
@@ -1113,7 +1116,7 @@ mod tests {
 
         let snapshot = EntitySnapshot::from(&entity);
         let snapshots: Vec<EntitySnapshot> = vec![snapshot];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity.update(1, 0, snapshot, &snapshots, &grid);
 
@@ -1148,7 +1151,7 @@ mod tests {
             EntitySnapshot::from(&entity),
             EntitySnapshot::from(&dead_attacker),
         ];
-        let mut grid = SpatialGrid::new(5.0, 10.0);
+        let mut grid = SpatialGrid::new(CELL_SIZE, SEARCH_RADIUS);
         grid.rebuild(&snapshots);
         entity.update(1, 0, snapshots[0], &snapshots, &grid);
 
