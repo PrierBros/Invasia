@@ -1,23 +1,15 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
 use js_sys::Float32Array;
 
-#[cfg(target_arch = "wasm32")]
 thread_local! {
     static PERFORMANCE: Option<web_sys::Performance> =
         web_sys::window().and_then(|w| w.performance());
 }
 
-#[cfg(target_arch = "wasm32")]
 fn performance_now() -> f64 {
     PERFORMANCE.with(|perf| perf.as_ref().map(|p| p.now()).unwrap_or(0.0))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn performance_now() -> f64 {
-    0.0
 }
 
 // AI Decision Scoring System modules
@@ -742,7 +734,6 @@ impl Simulation {
         result
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[wasm_bindgen]
     pub fn get_flat_snapshot(&mut self) -> Float32Array {
         let start = performance_now();
