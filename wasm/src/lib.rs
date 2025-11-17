@@ -439,7 +439,7 @@ impl Simulation {
     /// Perform one simulation tick (update all entities)
     #[wasm_bindgen]
     pub fn step(&mut self) {
-        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        #[cfg(target_arch = "wasm32")]
         let start = web_sys::window()
             .and_then(|w| w.performance())
             .map(|p| p.now())
@@ -557,7 +557,7 @@ impl Simulation {
         self.snapshot_dirty = true;
         
         // Record timing (only on wasm32)
-        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        #[cfg(target_arch = "wasm32")]
         if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
             self.last_tick_duration_ms = perf.now() - start;
         }
@@ -616,7 +616,7 @@ impl Simulation {
             return JsValue::NULL; // Signal no update needed
         }
         
-        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        #[cfg(target_arch = "wasm32")]
         let start = web_sys::window()
             .and_then(|w| w.performance())
             .map(|p| p.now())
@@ -624,7 +624,7 @@ impl Simulation {
         
         let result = serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL);
         
-        #[cfg(all(target_arch = "wasm32", feature = "default"))]
+        #[cfg(target_arch = "wasm32")]
         if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
             self.last_snapshot_duration_ms = perf.now() - start;
         }

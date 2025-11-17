@@ -41,9 +41,14 @@
   
   // Performance metrics
   let actualTickRate: number = 0;
+  let actualRenderRate: number = 0;
   let tickDuration: number = 0;
   let snapshotDuration: number = 0;
   let lastTickTime: number = 0;
+  let lastTickCount: number = 0;
+  let tickRateMeasureTime: number = 0;
+  let renderRateMeasureTime: number = 0;
+  let renderFrameCount: number = 0;
   
   // Update loop
   let updateInterval: number | null = null;
@@ -219,16 +224,40 @@
   function updateSnapshot(): void {
     if (!simulation || !wasmLoaded) return;
     
-    const currentTickTime = performance.now();
-    if (lastTickTime > 0) {
-      const timeSinceLastTick = currentTickTime - lastTickTime;
-      if (timeSinceLastTick > 0) {
-        actualTickRate = 1000 / timeSinceLastTick;
-      }
-    }
-    lastTickTime = currentTickTime;
+    const currentTime = performance.now();
+    const currentTick = simulation.get_tick();
     
-    tick = simulation.get_tick();
+    // Track render frame count
+    renderFrameCount++;
+    
+    // Calculate actual render rate
+    if (renderRateMeasureTime > 0) {
+      const timeDelta = currentTime - renderRateMeasureTime;
+      if (timeDelta >= 1000) { // Update every second
+        actualRenderRate = (renderFrameCount / timeDelta) * 1000;
+        renderRateMeasureTime = currentTime;
+        renderFrameCount = 0;
+      }
+    } else {
+      renderRateMeasureTime = currentTime;
+    }
+    
+    // Calculate actual tick rate based on tick count changes over time
+    if (tickRateMeasureTime > 0) {
+      const timeDelta = currentTime - tickRateMeasureTime;
+      const tickDelta = currentTick - lastTickCount;
+      
+      if (timeDelta >= 1000) { // Update every second
+        actualTickRate = (tickDelta / timeDelta) * 1000;
+        tickRateMeasureTime = currentTime;
+        lastTickCount = currentTick;
+      }
+    } else {
+      tickRateMeasureTime = currentTime;
+      lastTickCount = currentTick;
+    }
+    
+    tick = currentTick;
     tickDuration = simulation.get_last_tick_duration();
     
     const snapshot = simulation.get_snapshot();
@@ -373,6 +402,8 @@
       <div class="performance-metrics">
         <p><strong>Target Tick Rate:</strong> {tickRate} Hz</p>
         <p><strong>Actual Tick Rate:</strong> {actualTickRate.toFixed(1)} Hz</p>
+        <p><strong>Target Render Rate:</strong> {renderRate} FPS</p>
+        <p><strong>Actual Render Rate:</strong> {actualRenderRate.toFixed(1)} FPS</p>
         <p><strong>Tick Duration:</strong> {tickDuration.toFixed(2)} ms</p>
         <p><strong>Snapshot Time:</strong> {snapshotDuration.toFixed(2)} ms</p>
         <p class="perf-indicator">
