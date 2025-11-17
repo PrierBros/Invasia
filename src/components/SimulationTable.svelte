@@ -225,7 +225,7 @@
     if (!simulation || !wasmLoaded) return;
     
     const currentTime = performance.now();
-    const currentTick = simulation.get_tick();
+    const currentTick = Number(simulation.get_tick()); // Convert BigInt to number
     
     // Track render frame count
     renderFrameCount++;
