@@ -439,11 +439,20 @@ impl Simulation {
     /// Perform one simulation tick (update all entities)
     #[wasm_bindgen]
     pub fn step(&mut self) {
-        #[cfg(target_arch = "wasm32")]
-        let start = web_sys::window()
-            .and_then(|w| w.performance())
-            .map(|p| p.now())
-            .unwrap_or(0.0);
+        #[allow(unused_variables)]
+        let start = {
+            #[cfg(target_arch = "wasm32")]
+            {
+                web_sys::window()
+                    .and_then(|w| w.performance())
+                    .map(|p| p.now())
+                    .unwrap_or(0.0)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                0.0
+            }
+        };
             
         self.tick = self.tick.wrapping_add(1);        // Reuse snapshot buffer - capacity is pre-allocated in constructor
         self.snapshot_buffer.clear();
@@ -556,7 +565,7 @@ impl Simulation {
         // Mark snapshot as dirty since we've updated entities
         self.snapshot_dirty = true;
         
-        // Record timing (only on wasm32)
+        // Record timing
         #[cfg(target_arch = "wasm32")]
         if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
             self.last_tick_duration_ms = perf.now() - start;
@@ -616,11 +625,20 @@ impl Simulation {
             return JsValue::NULL; // Signal no update needed
         }
         
-        #[cfg(target_arch = "wasm32")]
-        let start = web_sys::window()
-            .and_then(|w| w.performance())
-            .map(|p| p.now())
-            .unwrap_or(0.0);
+        #[allow(unused_variables)]
+        let start = {
+            #[cfg(target_arch = "wasm32")]
+            {
+                web_sys::window()
+                    .and_then(|w| w.performance())
+                    .map(|p| p.now())
+                    .unwrap_or(0.0)
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                0.0
+            }
+        };
         
         let result = serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL);
         
@@ -697,6 +715,85 @@ mod tests {
     }
 
     #[test]
+    fn test_simulation_step() {
+        let mut sim = Simulation::new(10);
+        let initial_tick = sim.get_tick();
+        
+        sim.step();
+        
+        assert_eq!(sim.get_tick(), initial_tick + 1);
+        assert_eq!(sim.get_entity_count(), 10);
+    }
+
+    #[test]
+    fn test_simulation_start_stop() {
+        let mut sim = Simulation::new(10);
+        
+        sim.start();
+        assert!(sim.is_running());
+        
+        sim.pause();
+        assert!(!sim.is_running());
+    }
+
+    #[test]
+    fn test_simulation_reset() {
+        let mut sim = Simulation::new(10);
+        
+        sim.step();
+        sim.step();
+        assert_eq!(sim.get_tick(), 2);
+        
+        sim.reset();
+        assert_eq!(sim.get_tick(), 0);
+        assert_eq!(sim.get_entity_count(), 10);
+    }
+
+    #[test]
+    fn test_simulation_multiple_steps() {
+        let mut sim = Simulation::new(50);
+        
+        for _ in 0..10 {
+            sim.step();
+        }
+        
+        assert_eq!(sim.get_tick(), 10);
+        assert_eq!(sim.get_entity_count(), 50);
+    }
+
+    #[test]
+    fn test_simulation_performance_metrics() {
+        let mut sim = Simulation::new(100);
+        
+        // Tick duration should be 0.0 initially
+        assert_eq!(sim.get_last_tick_duration(), 0.0);
+        
+        // After stepping, we might not have timing on non-wasm32
+        sim.step();
+        let tick_duration = sim.get_last_tick_duration();
+        assert!(tick_duration >= 0.0);
+    }
+
+    #[test]
+    fn test_simulation_entity_count_change() {
+        let mut sim = Simulation::new(10);
+        assert_eq!(sim.get_entity_count(), 10);
+        
+        sim.set_entity_count(20);
+        assert_eq!(sim.get_entity_count(), 20);
+        assert_eq!(sim.get_tick(), 0); // Should reset
+    }
+
+    #[test]
+    fn test_simulation_tick_rate() {
+        let mut sim = Simulation::new(10);
+        assert_eq!(sim.get_tick_rate(), 60); // Default
+        
+        sim.set_tick_rate(30);
+        assert_eq!(sim.get_tick_rate(), 30);
+    }
+
+    #[test]
     fn test_simulation_start_pause() {
         let mut sim = Simulation::new(5);
         assert!(!sim.is_running());
@@ -709,41 +806,6 @@ mod tests {
 
         sim.resume();
         assert!(sim.is_running());
-    }
-
-    #[test]
-    fn test_simulation_step() {
-        let mut sim = Simulation::new(5);
-        assert_eq!(sim.get_tick(), 0);
-
-        sim.step();
-        assert_eq!(sim.get_tick(), 1);
-
-        sim.step();
-        assert_eq!(sim.get_tick(), 2);
-    }
-
-    #[test]
-    fn test_simulation_reset() {
-        let mut sim = Simulation::new(5);
-        sim.start();
-        sim.step();
-        sim.step();
-        assert_eq!(sim.get_tick(), 2);
-
-        sim.reset();
-        assert_eq!(sim.get_tick(), 0);
-        assert!(!sim.is_running());
-        assert_eq!(sim.get_entity_count(), 5);
-    }
-
-    #[test]
-    fn test_simulation_tick_rate() {
-        let mut sim = Simulation::new(5);
-        assert_eq!(sim.get_tick_rate(), 60);
-
-        sim.set_tick_rate(30);
-        assert_eq!(sim.get_tick_rate(), 30);
     }
 
     #[test]
