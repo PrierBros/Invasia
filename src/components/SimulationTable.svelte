@@ -29,17 +29,19 @@
   let wasmLoaded: boolean = false;
   let error: string | null = null;
   
-  const ENTITY_FIELD_COUNT = 8;
-  const FIELD_INDEX = {
+  // Field count and indices are imported from WASM module at runtime
+  // This removes coupling between Rust and TypeScript - the structure is defined only in Rust
+  let ENTITY_FIELD_COUNT = 0;
+  let FIELD_INDEX = {
     id: 0,
-    health: 1,
-    military_strength: 2,
-    money: 3,
-    territory: 4,
-    state: 5,
-    position_x: 6,
-    position_y: 7,
-  } as const;
+    health: 0,
+    military_strength: 0,
+    money: 0,
+    territory: 0,
+    state: 0,
+    position_x: 0,
+    position_y: 0,
+  };
   const STATE_DEAD = 4;
 
   // Simulation data
@@ -179,6 +181,20 @@
       // Dynamically import the WASM module
       const wasmModule = await import('../wasm/wasm.js');
       await wasmModule.default();
+      
+      // Initialize field count and indices from WASM module
+      // This eliminates coupling between Rust and TypeScript - structure is defined only in Rust
+      ENTITY_FIELD_COUNT = wasmModule.get_snapshot_field_count();
+      FIELD_INDEX = {
+        id: wasmModule.get_field_index_id(),
+        health: wasmModule.get_field_index_health(),
+        military_strength: wasmModule.get_field_index_military_strength(),
+        money: wasmModule.get_field_index_money(),
+        territory: wasmModule.get_field_index_territory(),
+        state: wasmModule.get_field_index_state(),
+        position_x: wasmModule.get_field_index_position_x(),
+        position_y: wasmModule.get_field_index_position_y(),
+      };
       
       // Initialize the simulation
       simulation = new wasmModule.Simulation(entityCount);

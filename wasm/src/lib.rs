@@ -298,6 +298,39 @@ impl From<&AiEntity> for EntitySnapshot {
 
 const SNAPSHOT_FIELD_COUNT: usize = 8; // id, health, military, money, territory, state, pos_x, pos_y
 
+/// Get the number of fields in the flat snapshot for each entity
+/// This allows TypeScript to infer the field count instead of duplicating it
+#[wasm_bindgen]
+pub fn get_snapshot_field_count() -> usize {
+    SNAPSHOT_FIELD_COUNT
+}
+
+/// Field indices for the flat snapshot array
+/// These constants allow TypeScript to access fields without duplicating the layout
+#[wasm_bindgen]
+pub fn get_field_index_id() -> usize { 0 }
+
+#[wasm_bindgen]
+pub fn get_field_index_health() -> usize { 1 }
+
+#[wasm_bindgen]
+pub fn get_field_index_military_strength() -> usize { 2 }
+
+#[wasm_bindgen]
+pub fn get_field_index_money() -> usize { 3 }
+
+#[wasm_bindgen]
+pub fn get_field_index_territory() -> usize { 4 }
+
+#[wasm_bindgen]
+pub fn get_field_index_state() -> usize { 5 }
+
+#[wasm_bindgen]
+pub fn get_field_index_position_x() -> usize { 6 }
+
+#[wasm_bindgen]
+pub fn get_field_index_position_y() -> usize { 7 }
+
 impl Simulation {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn ensure_flat_snapshot_capacity(&mut self) {
