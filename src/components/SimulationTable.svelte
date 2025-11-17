@@ -85,6 +85,10 @@
   let tableScrollTop: number = 0;
   const rowHeight: number = 45; // Approximate row height in pixels
 
+  // Performance optimization: cache alive entity indices to avoid full iteration
+  let aliveEntityIndices: Uint32Array | null = null;
+  let lastDataView: Float32Array | null = null;
+
   function handleTableScroll(event: Event): void {
     const target = event.target as HTMLElement;
     tableScrollTop = target.scrollTop;
@@ -109,6 +113,17 @@
       position_x: dataView[base + FIELD_INDEX.position_x],
       position_y: dataView[base + FIELD_INDEX.position_y],
     };
+  }
+
+  function buildAliveIndicesCache(dataView: Float32Array, totalCount: number): Uint32Array {
+    const indices: number[] = [];
+    for (let idx = 0; idx < totalCount; idx += 1) {
+      const stateValue = dataView[idx * ENTITY_FIELD_COUNT + FIELD_INDEX.state];
+      if (stateValue !== STATE_DEAD) {
+        indices.push(idx);
+      }
+    }
+    return new Uint32Array(indices);
   }
 
   function rebuildVisibleEntities(
@@ -143,23 +158,33 @@
       return;
     }
 
-    let filteredIndex = 0;
-    const buffer: AiEntity[] = [];
-    for (let idx = 0; idx < totalCount; idx += 1) {
-      const stateValue = dataView[idx * ENTITY_FIELD_COUNT + FIELD_INDEX.state];
-      if (stateValue === STATE_DEAD) {
-        continue;
-      }
-      if (filteredIndex >= clampedStart && filteredIndex < clampedEnd) {
-        buffer.push(extractEntity(dataView, idx));
-      }
-      filteredIndex += 1;
+    // Rebuild cache only when data changes
+    if (dataView !== lastDataView) {
+      aliveEntityIndices = buildAliveIndicesCache(dataView, totalCount);
+      lastDataView = dataView;
     }
 
-    filteredEntityCount = filteredIndex;
+    if (!aliveEntityIndices) {
+      visibleEntities = [];
+      filteredEntityCount = 0;
+      currentListLength = 0;
+      topPadding = 0;
+      bottomPadding = 0;
+      return;
+    }
+
+    // Direct access using cached indices - O(visibleRange) instead of O(totalCount)
+    filteredEntityCount = aliveEntityIndices.length;
     currentListLength = filteredEntityCount;
     const effectiveStart = Math.min(clampedStart, filteredEntityCount);
     const effectiveEnd = Math.min(clampedEnd, filteredEntityCount);
+    
+    const buffer: AiEntity[] = [];
+    for (let i = effectiveStart; i < effectiveEnd; i += 1) {
+      const entityIdx = aliveEntityIndices[i];
+      buffer.push(extractEntity(dataView, entityIdx));
+    }
+
     visibleEntities = buffer;
     topPadding = effectiveStart * rowHeight;
     bottomPadding = Math.max(0, (filteredEntityCount - effectiveEnd) * rowHeight);
