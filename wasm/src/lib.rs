@@ -751,7 +751,9 @@ impl Simulation {
         if start > 0.0 && end >= start {
             self.last_snapshot_duration_ms = end - start;
         }
-        unsafe { Float32Array::view(&self.flat_snapshot) }
+        // Copy data to JavaScript-owned memory instead of creating a view
+        // This ensures JavaScript doesn't hold references to Rust memory that could be freed
+        Float32Array::from(self.flat_snapshot.as_slice())
     }
 
     /// Get last tick duration in milliseconds
