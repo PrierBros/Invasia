@@ -6,13 +6,13 @@ use crate::dependency::performance_now;
 use crate::logic::SimulationLogic;
 
 #[wasm_bindgen]
-pub struct SimulationService {
+pub struct Simulation {
     data: SimulationData,
     logic: SimulationLogic,
 }
 
 #[wasm_bindgen]
-impl SimulationService {
+impl Simulation {
     #[wasm_bindgen(constructor)]
     pub fn new(entity_count: usize) -> Self {
         Self {
@@ -137,7 +137,7 @@ impl SimulationService {
 }
 
 #[cfg(test)]
-impl SimulationService {
+impl Simulation {
     pub(crate) fn data(&self) -> &SimulationData {
         &self.data
     }
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_simulation_creation() {
-        let sim = SimulationService::new(10);
+        let sim = Simulation::new(10);
         assert_eq!(sim.get_entity_count(), 10);
         assert_eq!(sim.get_tick(), 0);
         assert!(!sim.is_running());
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_simulation_step() {
-        let mut sim = SimulationService::new(10);
+        let mut sim = Simulation::new(10);
         let initial_tick = sim.get_tick();
         sim.step();
         assert_eq!(sim.get_tick(), initial_tick + 1);
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_start_pause_resume() {
-        let mut sim = SimulationService::new(5);
+        let mut sim = Simulation::new(5);
         sim.start();
         assert!(sim.is_running());
         sim.pause();
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn test_reset_rebuilds_entities() {
-        let mut sim = SimulationService::new(10);
+        let mut sim = Simulation::new(10);
         sim.step();
         assert!(sim.get_tick() > 0);
         sim.reset();
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_entity_death_transfers_resources() {
-        let mut sim = SimulationService::new(3);
+        let mut sim = Simulation::new(3);
         {
             let data = sim.data_mut();
             data.entities[0].health = 0.0;
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_tick_rate_configuration() {
-        let mut sim = SimulationService::new(10);
+        let mut sim = Simulation::new(10);
         assert_eq!(sim.get_tick_rate(), 60);
         sim.set_tick_rate(30);
         assert_eq!(sim.get_tick_rate(), 30);
