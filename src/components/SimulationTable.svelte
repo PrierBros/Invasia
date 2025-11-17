@@ -44,6 +44,9 @@
   let actualRenderRate: number = 0;
   let tickDuration: number = 0;
   let snapshotDuration: number = 0;
+  let avgTickDuration: number = 0;
+  let avgSnapshotDuration: number = 0;
+  let durationSampleCount: number = 0;
   let lastTickTime: number = 0;
   let lastTickCount: number = 0;
   let tickRateMeasureTime: number = 0;
@@ -168,7 +171,12 @@
     simulation.set_tick_rate(tickRate);
     updateSnapshot();
     
-    // Update render loop to match new tick rate
+    // Reset averages when config changes
+    avgTickDuration = 0;
+    avgSnapshotDuration = 0;
+    durationSampleCount = 0;
+    
+    // Update render loop to match new render rate
     updateRenderLoop();
   }
 
@@ -259,9 +267,18 @@
     
     tick = currentTick;
     tickDuration = simulation.get_last_tick_duration();
+    snapshotDuration = simulation.get_last_snapshot_duration();
+    
+    // Calculate running averages for durations (more stable/readable)
+    durationSampleCount++;
+    if (tickDuration > 0) {
+      avgTickDuration = avgTickDuration + (tickDuration - avgTickDuration) / Math.min(durationSampleCount, 100);
+    }
+    if (snapshotDuration > 0) {
+      avgSnapshotDuration = avgSnapshotDuration + (snapshotDuration - avgSnapshotDuration) / Math.min(durationSampleCount, 100);
+    }
     
     const snapshot = simulation.get_snapshot();
-    snapshotDuration = simulation.get_last_snapshot_duration();
     
     // Only update entities if snapshot is not null (data changed)
     if (snapshot !== null && snapshot !== undefined) {
@@ -404,8 +421,8 @@
         <p><strong>Actual Tick Rate:</strong> {actualTickRate.toFixed(1)} Hz</p>
         <p><strong>Target Render Rate:</strong> {renderRate} FPS</p>
         <p><strong>Actual Render Rate:</strong> {actualRenderRate.toFixed(1)} FPS</p>
-        <p><strong>Tick Duration:</strong> {tickDuration.toFixed(2)} ms</p>
-        <p><strong>Snapshot Time:</strong> {snapshotDuration.toFixed(2)} ms</p>
+        <p><strong>Avg Tick Duration:</strong> {avgTickDuration.toFixed(2)} ms</p>
+        <p><strong>Avg Snapshot Time:</strong> {avgSnapshotDuration.toFixed(2)} ms</p>
         <p class="perf-indicator">
           <strong>Performance:</strong> 
           {#if actualTickRate >= tickRate * 0.9}
