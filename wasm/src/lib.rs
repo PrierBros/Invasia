@@ -47,8 +47,10 @@ pub struct AiEntity {
     pub position_x: f32,
     pub position_y: f32,
     pub state: AiState,
-    pub territory: f32,  // Territory controlled by this entity
-    pub money: f32,      // Money/resources owned by this entity
+    pub territory: f32, // Territory controlled by this entity
+    pub money: f32,     // Money/resources owned by this entity
+    #[serde(skip)]
+    rng_state: u32,
 }
 
 impl AiEntity {
@@ -67,11 +69,11 @@ impl AiEntity {
         // Vary initial health between 70 and 100
         let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
         let initial_health = 70.0 + (health_variation * 30.0);
-        
+
         // Vary initial money between 100 and 200
         let money_variation = ((id_seed * 3.141).sin() + 1.0) / 2.0;
         let initial_money = 100.0 + (money_variation * 100.0);
-        
+
         // Randomize initial state based on id
         let state_seed = ((id_seed * 2.718).sin() + 1.0) / 2.0;
         let initial_state = if state_seed < 0.25 {
@@ -89,7 +91,7 @@ impl AiEntity {
         // Use multiple sine waves with different frequencies for good distribution
         let x_seed = ((id_seed * 0.3371).sin() + (id_seed * 0.0157).sin()) * 0.5;
         let y_seed = ((id_seed * 0.4219).cos() + (id_seed * 0.0213).cos()) * 0.5;
-        
+
         // Spawn within world bounds, leaving margin to prevent immediate edge cases
         let spawn_x = x_seed * 1200.0; // Range: [-1200, 1200]
         let spawn_y = y_seed * 1200.0; // Range: [-1200, 1200]
@@ -101,15 +103,54 @@ impl AiEntity {
             position_x: spawn_x,
             position_y: spawn_y,
             state: initial_state,
-            territory: 10.0,  // Start with small territory
+            territory: 10.0, // Start with small territory
             money: initial_money,
+            rng_state: Self::seed_rng(id),
         }
+    }
+
+    #[inline]
+    fn seed_rng(id: u32) -> u32 {
+        let mut seed = id.wrapping_mul(747_796_405).wrapping_add(2_891_336_453) ^ 0xA511_E9B3;
+        if seed == 0 {
+            seed = 1;
+        }
+        seed
+    }
+
+    #[inline]
+    fn next_random(&mut self) -> f32 {
+        // Xorshift32 - fast deterministic RNG for per-entity variation
+        let mut x = self.rng_state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        if x == 0 {
+            x = 1;
+        }
+        self.rng_state = x; // Prevent zero lock-up
+        const INV_U32_MAX: f32 = 1.0 / (u32::MAX as f32);
+        (self.rng_state as f32) * INV_U32_MAX
+    }
+
+    #[inline]
+    fn next_variation(&mut self) -> f32 {
+        // Mimic previous 0.25..2.25 range by multiplying two [0.5, 1.5) samples
+        let a = 0.5 + self.next_random();
+        let b = 0.5 + self.next_random();
+        a * b
+    }
+
+    #[inline]
+    fn random_symmetric(&mut self) -> f32 {
+        self.next_random() * 2.0 - 1.0
     }
 
     /// Update the entity for one simulation tick
     pub(crate) fn update(
         &mut self,
-        tick: u64,
+        _tick: u64,
+        self_index: usize,
         entity_snapshots: &[EntitySnapshot],
         neighbor_indices: &[usize],
     ) {
@@ -117,15 +158,12 @@ impl AiEntity {
         if self.state == AiState::Dead {
             return;
         }
-        
-        // Deterministic update logic based on tick and entity id
-        let seed1 = (tick.wrapping_mul(1000) + self.id as u64) as f32;
-        let seed2 = (tick.wrapping_mul(7919) + self.id.wrapping_mul(6547) as u64) as f32;
 
-        // Create entity-specific variation factors (0.5 to 1.5 range)
-        let id_factor = ((self.id as f32 * 0.7321).sin() + 1.0) / 2.0 + 0.5;
-        let tick_factor = ((seed2 * 0.00123).cos() + 1.0) / 2.0 + 0.5;
-        let variation = id_factor * tick_factor;
+        // Deterministic variation using fast per-entity RNG
+        let mut variation = self.next_variation();
+        if variation < 0.25 {
+            variation = 0.25;
+        }
 
         // Military strength dynamics with per-entity variation
         match self.state {
@@ -146,12 +184,12 @@ impl AiEntity {
 
                 // Simple deterministic movement with boundary constraints
                 // Grid world bounds are [-1250, 1250) to stay within 500x500 cells at cell_size=5.0
-                let movement_x = (seed1 * 0.1).sin() * 2.0 * variation;
-                let movement_y = (seed1 * 0.1).cos() * 2.0 * variation;
-                
+                let movement_x = self.random_symmetric() * 2.0 * variation;
+                let movement_y = self.random_symmetric() * 2.0 * variation;
+
                 let new_x = self.position_x + movement_x;
                 let new_y = self.position_y + movement_y;
-                
+
                 // Constrain to world bounds with small margin
                 const WORLD_BOUND: f32 = 1230.0; // Stay within [-1230, 1230] for safety margin
                 self.position_x = new_x.clamp(-WORLD_BOUND, WORLD_BOUND);
@@ -182,16 +220,24 @@ impl AiEntity {
         // Note: All neighbors from spatial grid are Active entities
         let mut total_damage = 0.0;
         for &other_index in neighbor_indices {
+            if other_index == self_index {
+                continue;
+            }
             let other = &entity_snapshots[other_index];
             // Spatial grid only contains Active entities, so no need to check state
-            debug_assert_eq!(other.state, AiState::Active, "Spatial grid should only contain Active entities");
-            
+            debug_assert_eq!(
+                other.state,
+                AiState::Active,
+                "Spatial grid should only contain Active entities"
+            );
+
             let dx = self.position_x - other.position_x;
             let dy = self.position_y - other.position_y;
             let dist_sq = dx * dx + dy * dy;
 
             // Use squared distance to avoid sqrt in hot loop
-            if dist_sq < 100.0 && dist_sq > 0.01 {  // 10.0^2 = 100.0, 0.1^2 = 0.01
+            if dist_sq < 100.0 && dist_sq > 0.01 {
+                // 10.0^2 = 100.0, 0.1^2 = 0.01
                 let damage = (other.military_strength / 100.0) * 0.5 * variation;
                 total_damage += damage;
             }
@@ -249,7 +295,7 @@ impl SpatialGrid {
         let capacity = GRID_SIZE * GRID_SIZE;
         let mut cells = Vec::with_capacity(capacity);
         cells.resize(capacity, ([0; MAX_ENTITIES_PER_CELL], 0));
-        
+
         Self {
             cell_size,
             search_radius,
@@ -273,9 +319,13 @@ impl SpatialGrid {
         let cy = (y / self.cell_size).floor() as i32;
         (cx, cy)
     }
-    
+
     fn cell_index(&self, cx: i32, cy: i32) -> Option<usize> {
-        if cx < self.grid_min.0 || cx >= self.grid_max.0 || cy < self.grid_min.1 || cy >= self.grid_max.1 {
+        if cx < self.grid_min.0
+            || cx >= self.grid_max.0
+            || cy < self.grid_min.1
+            || cy >= self.grid_max.1
+        {
             return None;
         }
         let x = (cx - self.grid_min.0) as usize;
@@ -291,7 +341,7 @@ impl SpatialGrid {
             if entity.state != AiState::Active {
                 continue; // Skip non-Active entities
             }
-            
+
             let coords = self.cell_coords(entity.position_x, entity.position_y);
             if let Some(cell_idx) = self.cell_index(coords.0, coords.1) {
                 let cell = &mut self.cells[cell_idx];
@@ -315,7 +365,7 @@ impl SpatialGrid {
                 }
             }
         }
-        
+
         // Log total overflow if it occurred
         #[cfg(debug_assertions)]
         {
@@ -453,8 +503,8 @@ impl Simulation {
                 0.0
             }
         };
-            
-        self.tick = self.tick.wrapping_add(1);        // Reuse snapshot buffer - capacity is pre-allocated in constructor
+
+        self.tick = self.tick.wrapping_add(1); // Reuse snapshot buffer - capacity is pre-allocated in constructor
         self.snapshot_buffer.clear();
         for entity in &self.entities {
             self.snapshot_buffer.push(EntitySnapshot::from(entity));
@@ -466,44 +516,43 @@ impl Simulation {
         let entities_len = self.entities.len();
         for i in 0..entities_len {
             self.neighbor_buffer.clear();
-            
+
             // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.snapshot_buffer.len());
             let entity_snapshot = unsafe { *self.snapshot_buffer.get_unchecked(i) };
-            
+
             self.grid.query_neighbors(
                 entity_snapshot.position_x,
                 entity_snapshot.position_y,
                 &mut self.neighbor_buffer,
             );
-            self.neighbor_buffer.retain(|&index| index != i);
 
             // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked_mut(i) };
-            entity.update(self.tick, &self.snapshot_buffer, &self.neighbor_buffer);
+            entity.update(self.tick, i, &self.snapshot_buffer, &self.neighbor_buffer);
         }
-        
+
         // Process deaths and transfer resources using pre-allocated buffers
         // Note: This has O(dead_count * neighbors_per_dead_entity) complexity.
         // In scenarios with many simultaneous deaths, this could cause frame spikes.
         self.resource_transfers.clear();
         self.dead_indices.clear();
-        
+
         // Single pass to identify dead entities and their resources
         for i in 0..entities_len {
             // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked(i) };
-            
+
             if entity.health <= 0.0 && entity.state != AiState::Dead {
                 self.dead_indices.push(i);
-                
+
                 // Find nearest Active attacker (only if there are resources to transfer)
                 if entity.military_strength > 0.0 || entity.money > 0.0 {
                     let mut nearest_attacker_idx: Option<usize> = None;
                     let mut nearest_dist_sq = f32::INFINITY;
-                    
+
                     // Use spatial grid to find nearby attackers more efficiently
                     // Using separate buffer to avoid confusion with neighbor_buffer
                     self.attacker_search_buffer.clear();
@@ -512,35 +561,43 @@ impl Simulation {
                         entity.position_y,
                         &mut self.attacker_search_buffer,
                     );
-                    
+
                     for &idx in &self.attacker_search_buffer {
                         if idx != i {
                             // Safety: idx comes from spatial grid which only contains valid entity indices
                             debug_assert!(idx < self.entities.len());
                             let other = unsafe { self.entities.get_unchecked(idx) };
-                            
+
                             // Spatial grid only contains Active entities, so no need to check state
-                            debug_assert_eq!(other.state, AiState::Active, "Spatial grid should only contain Active entities");
-                            
+                            debug_assert_eq!(
+                                other.state,
+                                AiState::Active,
+                                "Spatial grid should only contain Active entities"
+                            );
+
                             let dx = entity.position_x - other.position_x;
                             let dy = entity.position_y - other.position_y;
                             let dist_sq = dx * dx + dy * dy;
-                            
+
                             if dist_sq < nearest_dist_sq {
                                 nearest_dist_sq = dist_sq;
                                 nearest_attacker_idx = Some(idx);
                             }
                         }
                     }
-                    
+
                     // Record transfer if attacker found
                     if let Some(attacker_idx) = nearest_attacker_idx {
-                        self.resource_transfers.push((attacker_idx, entity.military_strength, entity.money));
+                        self.resource_transfers.push((
+                            attacker_idx,
+                            entity.military_strength,
+                            entity.money,
+                        ));
                     }
                 }
             }
         }
-        
+
         // Apply resource transfers to attackers (now O(1) lookups)
         for &(attacker_idx, military_strength, money) in &self.resource_transfers {
             // Safety: attacker_idx comes from the loop above which uses valid entity indices
@@ -549,7 +606,7 @@ impl Simulation {
             attacker.military_strength += military_strength;
             attacker.money += money;
         }
-        
+
         // Set dead entities to terminal state with all values at zero (now O(1) lookups)
         for &dead_idx in &self.dead_indices {
             // Safety: dead_idx comes from the loop above which uses valid entity indices
@@ -561,10 +618,10 @@ impl Simulation {
             dead_entity.money = 0.0;
             dead_entity.territory = 0.0;
         }
-        
+
         // Mark snapshot as dirty since we've updated entities
         self.snapshot_dirty = true;
-        
+
         // Record timing
         #[cfg(target_arch = "wasm32")]
         if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
@@ -624,7 +681,7 @@ impl Simulation {
         if !self.snapshot_dirty {
             return JsValue::NULL; // Signal no update needed
         }
-        
+
         #[allow(unused_variables)]
         let start = {
             #[cfg(target_arch = "wasm32")]
@@ -639,24 +696,24 @@ impl Simulation {
                 0.0
             }
         };
-        
+
         let result = serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL);
-        
+
         #[cfg(target_arch = "wasm32")]
         if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
             self.last_snapshot_duration_ms = perf.now() - start;
         }
-        
+
         self.snapshot_dirty = false;
         result
     }
-    
+
     /// Get last tick duration in milliseconds
     #[wasm_bindgen]
     pub fn get_last_tick_duration(&self) -> f64 {
         self.last_tick_duration_ms
     }
-    
+
     /// Get last snapshot serialization duration in milliseconds
     #[wasm_bindgen]
     pub fn get_last_snapshot_duration(&self) -> f64 {
@@ -700,7 +757,7 @@ mod tests {
     fn test_ai_entity_update() {
         let mut entity = AiEntity::new(0);
         let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, &snapshots, &[]);
+        entity.update(1, 0, &snapshots, &[]);
         // Military strength should change after update (may increase or decrease depending on state)
         // Just verify the update doesn't crash
         assert!(entity.military_strength >= 0.0 && entity.military_strength <= 100.0);
@@ -718,9 +775,9 @@ mod tests {
     fn test_simulation_step() {
         let mut sim = Simulation::new(10);
         let initial_tick = sim.get_tick();
-        
+
         sim.step();
-        
+
         assert_eq!(sim.get_tick(), initial_tick + 1);
         assert_eq!(sim.get_entity_count(), 10);
     }
@@ -728,10 +785,10 @@ mod tests {
     #[test]
     fn test_simulation_start_stop() {
         let mut sim = Simulation::new(10);
-        
+
         sim.start();
         assert!(sim.is_running());
-        
+
         sim.pause();
         assert!(!sim.is_running());
     }
@@ -739,11 +796,11 @@ mod tests {
     #[test]
     fn test_simulation_reset() {
         let mut sim = Simulation::new(10);
-        
+
         sim.step();
         sim.step();
         assert_eq!(sim.get_tick(), 2);
-        
+
         sim.reset();
         assert_eq!(sim.get_tick(), 0);
         assert_eq!(sim.get_entity_count(), 10);
@@ -752,11 +809,11 @@ mod tests {
     #[test]
     fn test_simulation_multiple_steps() {
         let mut sim = Simulation::new(50);
-        
+
         for _ in 0..10 {
             sim.step();
         }
-        
+
         assert_eq!(sim.get_tick(), 10);
         assert_eq!(sim.get_entity_count(), 50);
     }
@@ -764,10 +821,10 @@ mod tests {
     #[test]
     fn test_simulation_performance_metrics() {
         let mut sim = Simulation::new(100);
-        
+
         // Tick duration should be 0.0 initially
         assert_eq!(sim.get_last_tick_duration(), 0.0);
-        
+
         // After stepping, we might not have timing on non-wasm32
         sim.step();
         let tick_duration = sim.get_last_tick_duration();
@@ -778,7 +835,7 @@ mod tests {
     fn test_simulation_entity_count_change() {
         let mut sim = Simulation::new(10);
         assert_eq!(sim.get_entity_count(), 10);
-        
+
         sim.set_entity_count(20);
         assert_eq!(sim.get_entity_count(), 20);
         assert_eq!(sim.get_tick(), 0); // Should reset
@@ -788,7 +845,7 @@ mod tests {
     fn test_simulation_tick_rate() {
         let mut sim = Simulation::new(10);
         assert_eq!(sim.get_tick_rate(), 60); // Default
-        
+
         sim.set_tick_rate(30);
         assert_eq!(sim.get_tick_rate(), 30);
     }
@@ -830,7 +887,7 @@ mod tests {
                 &mut neighbors,
             );
             neighbors.retain(|&idx| idx != i);
-            entities[i].update(1, &snapshots, &neighbors);
+            entities[i].update(1, i, &snapshots, &neighbors);
         }
 
         // Print military strength values for debugging
@@ -900,7 +957,7 @@ mod tests {
             &mut neighbors,
         );
         neighbors.retain(|&idx| idx != 0);
-        entity1.update(1, &snapshots, &neighbors);
+        entity1.update(1, 0, &snapshots, &neighbors);
 
         // Health should have decreased due to being attacked
         assert!(
@@ -921,7 +978,7 @@ mod tests {
 
         // Update entity (alone, no combat)
         let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, &snapshots, &[]);
+        entity.update(1, 0, &snapshots, &[]);
 
         // Territory should have increased
         assert!(
@@ -941,7 +998,7 @@ mod tests {
 
         // Update with no nearby entities
         let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, &snapshots, &[]);
+        entity.update(1, 0, &snapshots, &[]);
 
         // Health should regenerate when safe
         assert!(
@@ -954,35 +1011,54 @@ mod tests {
     fn test_death_when_health_reaches_zero() {
         // Create a simulation with two entities
         let mut sim = Simulation::new(2);
-        
+
         // Set one entity to have zero health and position it
         sim.entities[0].health = 0.0;
         sim.entities[0].military_strength = 50.0;
         sim.entities[0].money = 100.0;
         sim.entities[0].position_x = 0.0;
         sim.entities[0].position_y = 0.0;
-        
+
         // Set the other entity to Active state nearby
         sim.entities[1].state = AiState::Active;
         sim.entities[1].position_x = 5.0;
         sim.entities[1].position_y = 0.0;
-        
+
         let initial_attacker_military = sim.entities[1].military_strength;
         let initial_attacker_money = sim.entities[1].money;
-        
+
         // Run one step to process death
         sim.step();
-        
+
         // First entity should be dead with all stats at zero
-        assert_eq!(sim.entities[0].state, AiState::Dead, "Entity with zero health should be dead");
-        assert_eq!(sim.entities[0].health, 0.0, "Dead entity health should be 0");
-        assert_eq!(sim.entities[0].military_strength, 0.0, "Dead entity military strength should be 0");
+        assert_eq!(
+            sim.entities[0].state,
+            AiState::Dead,
+            "Entity with zero health should be dead"
+        );
+        assert_eq!(
+            sim.entities[0].health, 0.0,
+            "Dead entity health should be 0"
+        );
+        assert_eq!(
+            sim.entities[0].military_strength, 0.0,
+            "Dead entity military strength should be 0"
+        );
         assert_eq!(sim.entities[0].money, 0.0, "Dead entity money should be 0");
-        assert_eq!(sim.entities[0].territory, 0.0, "Dead entity territory should be 0");
-        
+        assert_eq!(
+            sim.entities[0].territory, 0.0,
+            "Dead entity territory should be 0"
+        );
+
         // Second entity should have received the resources
-        assert!(sim.entities[1].military_strength > initial_attacker_military, "Attacker should receive military strength");
-        assert!(sim.entities[1].money > initial_attacker_money, "Attacker should receive money");
+        assert!(
+            sim.entities[1].military_strength > initial_attacker_military,
+            "Attacker should receive military strength"
+        );
+        assert!(
+            sim.entities[1].money > initial_attacker_money,
+            "Attacker should receive money"
+        );
     }
 
     #[test]
@@ -994,14 +1070,17 @@ mod tests {
         entity.military_strength = 0.0;
         entity.money = 0.0;
         entity.territory = 0.0;
-        
+
         let snapshots: Vec<EntitySnapshot> = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, &snapshots, &[]);
-        
+        entity.update(1, 0, &snapshots, &[]);
+
         // All stats should remain at zero
         assert_eq!(entity.state, AiState::Dead, "Dead entity should stay dead");
         assert_eq!(entity.health, 0.0, "Dead entity health should stay 0");
-        assert_eq!(entity.military_strength, 0.0, "Dead entity military strength should stay 0");
+        assert_eq!(
+            entity.military_strength, 0.0,
+            "Dead entity military strength should stay 0"
+        );
         assert_eq!(entity.money, 0.0, "Dead entity money should stay 0");
         assert_eq!(entity.territory, 0.0, "Dead entity territory should stay 0");
     }
@@ -1013,23 +1092,26 @@ mod tests {
         entity.health = 50.0;
         entity.position_x = 0.0;
         entity.position_y = 0.0;
-        
+
         let mut dead_attacker = AiEntity::new(1);
         dead_attacker.state = AiState::Dead;
         dead_attacker.position_x = 5.0;
         dead_attacker.position_y = 0.0;
         dead_attacker.military_strength = 0.0;
-        
+
         let initial_health = entity.health;
-        
+
         let snapshots: Vec<EntitySnapshot> = vec![
             EntitySnapshot::from(&entity),
             EntitySnapshot::from(&dead_attacker),
         ];
-        entity.update(1, &snapshots, &[]);
-        
+        entity.update(1, 0, &snapshots, &[]);
+
         // Health should not decrease from dead attacker
-        assert!(entity.health >= initial_health, "Dead entities should not deal damage");
+        assert!(
+            entity.health >= initial_health,
+            "Dead entities should not deal damage"
+        );
     }
 
     #[test]
@@ -1037,134 +1119,193 @@ mod tests {
         // Verify that entities are created with money
         let entity = AiEntity::new(0);
         assert!(entity.money > 0.0, "New entities should have money");
-        assert!(entity.money >= 100.0 && entity.money <= 200.0, "Money should be in expected range");
+        assert!(
+            entity.money >= 100.0 && entity.money <= 200.0,
+            "Money should be in expected range"
+        );
     }
 
     #[test]
     fn test_resource_transfer_to_nearest_attacker() {
         // Create a simulation with three entities
         let mut sim = Simulation::new(3);
-        
+
         // Entity 0 will die
         sim.entities[0].health = 0.0;
         sim.entities[0].military_strength = 100.0;
         sim.entities[0].money = 200.0;
         sim.entities[0].position_x = 0.0;
         sim.entities[0].position_y = 0.0;
-        
+
         // Entity 1 is Active and nearby (will receive resources)
         sim.entities[1].state = AiState::Active;
         sim.entities[1].position_x = 3.0;
         sim.entities[1].position_y = 0.0;
         let entity1_initial_military = sim.entities[1].military_strength;
         let entity1_initial_money = sim.entities[1].money;
-        
+
         // Entity 2 is Active but far away (should not receive resources)
         sim.entities[2].state = AiState::Active;
         sim.entities[2].position_x = 50.0;
         sim.entities[2].position_y = 50.0;
         let entity2_initial_military = sim.entities[2].military_strength;
         let entity2_initial_money = sim.entities[2].money;
-        
+
         // Run one step to process death
         sim.step();
-        
+
         // Entity 0 should be dead
         assert_eq!(sim.entities[0].state, AiState::Dead);
-        
+
         // Entity 1 (nearest) should have received resources
         // Note: military strength also changes during update, so we check it increased by at least the transferred amount
-        assert!(sim.entities[1].military_strength >= entity1_initial_military + 100.0 - 1.0, 
-                "Entity 1 should receive military strength from dead entity");
-        assert!(sim.entities[1].money >= entity1_initial_money + 200.0, 
-                "Entity 1 should receive money from dead entity");
-        
+        assert!(
+            sim.entities[1].military_strength >= entity1_initial_military + 100.0 - 1.0,
+            "Entity 1 should receive military strength from dead entity"
+        );
+        assert!(
+            sim.entities[1].money >= entity1_initial_money + 200.0,
+            "Entity 1 should receive money from dead entity"
+        );
+
         // Entity 2 (far) should not have received the dead entity's resources
         // Check that Entity 2's resources didn't increase by the same large amount
         let entity2_military_gain = sim.entities[2].military_strength - entity2_initial_military;
         let entity2_money_gain = sim.entities[2].money - entity2_initial_money;
-        assert!(entity2_military_gain < 50.0, "Entity 2 should not receive significant military strength");
-        assert!(entity2_money_gain < 50.0, "Entity 2 should not receive significant money");
+        assert!(
+            entity2_military_gain < 50.0,
+            "Entity 2 should not receive significant military strength"
+        );
+        assert!(
+            entity2_money_gain < 50.0,
+            "Entity 2 should not receive significant money"
+        );
     }
 
     #[test]
     #[ignore] // This is a performance benchmark test - run with: cargo test -- --ignored
     fn test_benchmark_10000_elements() {
         use std::time::Instant;
-        
+
         const ENTITY_COUNT: usize = 10_000;
         const TARGET_HZ: u32 = 240;
         const TARGET_TICK_TIME_MS: f64 = 1000.0 / TARGET_HZ as f64; // ~4.17ms per tick
         const BENCHMARK_TICKS: usize = 100; // Run 100 ticks for benchmarking
-        
+
         println!("\n=== Benchmark: 10,000 Elements at 240 Hz Target ===");
         println!("Entity count: {}", ENTITY_COUNT);
         println!("Target tick rate: {} Hz", TARGET_HZ);
         println!("Target time per tick: {:.2} ms", TARGET_TICK_TIME_MS);
-        
+
         // Create simulation with 10,000 entities
         let mut sim = Simulation::init(ENTITY_COUNT, TARGET_HZ);
-        
+
         // Verify entity count
-        assert_eq!(sim.get_entity_count(), ENTITY_COUNT, 
-                   "Simulation should have exactly {} entities", ENTITY_COUNT);
-        
+        assert_eq!(
+            sim.get_entity_count(),
+            ENTITY_COUNT,
+            "Simulation should have exactly {} entities",
+            ENTITY_COUNT
+        );
+
         // Warm-up: Run 5 ticks to ensure everything is initialized
         println!("\nWarming up...");
         for _ in 0..5 {
             sim.step();
         }
-        
+
         // Benchmark: Run multiple ticks and measure time
         println!("Running {} ticks for benchmark...", BENCHMARK_TICKS);
         let start = Instant::now();
-        
+
         for _ in 0..BENCHMARK_TICKS {
             sim.step();
         }
-        
+
         let elapsed = start.elapsed();
         let elapsed_ms = elapsed.as_secs_f64() * 1000.0;
         let avg_tick_time_ms = elapsed_ms / BENCHMARK_TICKS as f64;
         let achieved_hz = 1000.0 / avg_tick_time_ms;
-        
+
         println!("\n--- Results ---");
-        println!("Total time for {} ticks: {:.2} ms ({:.2} s)", 
-                 BENCHMARK_TICKS, elapsed_ms, elapsed.as_secs_f64());
+        println!(
+            "Total time for {} ticks: {:.2} ms ({:.2} s)",
+            BENCHMARK_TICKS,
+            elapsed_ms,
+            elapsed.as_secs_f64()
+        );
         println!("Average time per tick: {:.2} ms", avg_tick_time_ms);
         println!("Achieved tick rate: {:.2} Hz", achieved_hz);
         println!("Target tick rate: {} Hz", TARGET_HZ);
-        println!("Performance ratio: {:.1}% of target", (achieved_hz / TARGET_HZ as f64) * 100.0);
-        
+        println!(
+            "Performance ratio: {:.1}% of target",
+            (achieved_hz / TARGET_HZ as f64) * 100.0
+        );
+
         // Verify that all entities were updated
-        assert!(sim.get_tick() >= BENCHMARK_TICKS as u64,
-                "All ticks should have been processed");
-        
+        assert!(
+            sim.get_tick() >= BENCHMARK_TICKS as u64,
+            "All ticks should have been processed"
+        );
+
         // Verify all entities still exist (none were removed)
-        assert_eq!(sim.get_entity_count(), ENTITY_COUNT,
-                   "All {} entities should still exist after updates", ENTITY_COUNT);
-        
+        assert_eq!(
+            sim.get_entity_count(),
+            ENTITY_COUNT,
+            "All {} entities should still exist after updates",
+            ENTITY_COUNT
+        );
+
         // Validate that all entities are being updated
         // Check that entities have varied states (proof they're being processed)
-        let active_count = sim.entities.iter().filter(|e| e.state == AiState::Active).count();
-        let resting_count = sim.entities.iter().filter(|e| e.state == AiState::Resting).count();
-        let moving_count = sim.entities.iter().filter(|e| e.state == AiState::Moving).count();
-        let idle_count = sim.entities.iter().filter(|e| e.state == AiState::Idle).count();
-        let dead_count = sim.entities.iter().filter(|e| e.state == AiState::Dead).count();
-        
+        let active_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state == AiState::Active)
+            .count();
+        let resting_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state == AiState::Resting)
+            .count();
+        let moving_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state == AiState::Moving)
+            .count();
+        let idle_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state == AiState::Idle)
+            .count();
+        let dead_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state == AiState::Dead)
+            .count();
+
         println!("\n--- Entity States ---");
-        println!("Active: {}, Resting: {}, Moving: {}, Idle: {}, Dead: {}",
-                 active_count, resting_count, moving_count, idle_count, dead_count);
-        
+        println!(
+            "Active: {}, Resting: {}, Moving: {}, Idle: {}, Dead: {}",
+            active_count, resting_count, moving_count, idle_count, dead_count
+        );
+
         // Verify entities have different states (they're being processed)
         let total_living = active_count + resting_count + moving_count + idle_count;
-        assert!(total_living > 0, "At least some entities should be alive and in various states");
-        
+        assert!(
+            total_living > 0,
+            "At least some entities should be alive and in various states"
+        );
+
         println!("\n✓ Benchmark COMPLETED:");
         println!("  - Successfully updated all {} entities", ENTITY_COUNT);
-        println!("  - Achieved {:.2} Hz ({:.1}% of {} Hz target)", 
-                 achieved_hz, (achieved_hz / TARGET_HZ as f64) * 100.0, TARGET_HZ);
-        
+        println!(
+            "  - Achieved {:.2} Hz ({:.1}% of {} Hz target)",
+            achieved_hz,
+            (achieved_hz / TARGET_HZ as f64) * 100.0,
+            TARGET_HZ
+        );
+
         // For now, we just report performance without strict assertion
         // as the requirement is to validate that it CAN update all items
         // The actual Hz achieved will vary based on hardware
@@ -1181,23 +1322,29 @@ mod tests {
     fn test_entities_stay_within_bounds() {
         // Test that entities with Moving state stay within world bounds
         let mut sim = Simulation::new(10);
-        
+
         // Set all entities to Moving state and run many ticks
         for entity in &mut sim.entities {
             entity.state = AiState::Moving;
         }
-        
+
         // Run 500 ticks to allow plenty of movement
         for _ in 0..500 {
             sim.step();
         }
-        
+
         // Verify all entities are still within bounds
         for entity in &sim.entities {
-            assert!(entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
-                   "Entity position_x {} is outside world bounds [-1250, 1250]", entity.position_x);
-            assert!(entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
-                   "Entity position_y {} is outside world bounds [-1250, 1250]", entity.position_y);
+            assert!(
+                entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
+                "Entity position_x {} is outside world bounds [-1250, 1250]",
+                entity.position_x
+            );
+            assert!(
+                entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
+                "Entity position_y {} is outside world bounds [-1250, 1250]",
+                entity.position_y
+            );
         }
     }
 
@@ -1205,31 +1352,31 @@ mod tests {
     fn test_spatial_grid_only_tracks_active() {
         // Test that the spatial grid only contains Active entities
         let mut sim = Simulation::new(20);
-        
+
         // Set specific states
         sim.entities[0].state = AiState::Active;
         sim.entities[0].position_x = 0.0;
         sim.entities[0].position_y = 0.0;
-        
+
         sim.entities[1].state = AiState::Resting;
         sim.entities[1].position_x = 5.0;
         sim.entities[1].position_y = 0.0;
-        
+
         sim.entities[2].state = AiState::Moving;
         sim.entities[2].position_x = 10.0;
         sim.entities[2].position_y = 0.0;
-        
+
         sim.entities[3].state = AiState::Active;
         sim.entities[3].position_x = 15.0;
         sim.entities[3].position_y = 0.0;
-        
+
         // Run one step to rebuild spatial grid
         sim.step();
-        
+
         // Query neighbors near entity 0 (should only find other Active entities)
         let mut neighbors = Vec::new();
         sim.grid.query_neighbors(0.0, 0.0, &mut neighbors);
-        
+
         // Verify all neighbors are from Active entities
         for &idx in &neighbors {
             if idx < sim.entities.len() {
@@ -1243,7 +1390,7 @@ mod tests {
     fn test_grid_handles_large_distribution() {
         // Test that the 500x500 grid can handle entities spread across the world
         let mut sim = Simulation::new(100);
-        
+
         // Manually position entities across the entire grid
         for i in 0..100 {
             let x = -1200.0 + (i as f32 * 24.0); // Spread across x axis
@@ -1252,22 +1399,33 @@ mod tests {
             sim.entities[i].position_y = y;
             sim.entities[i].state = AiState::Active; // Make them all Active
         }
-        
+
         // Run multiple steps
         for _ in 0..10 {
             sim.step();
         }
-        
+
         // Verify no entities were lost and all are still within bounds
-        let active_count = sim.entities.iter().filter(|e| e.state != AiState::Dead).count();
-        assert!(active_count >= 50, "Most entities should still be alive after 10 ticks");
-        
+        let active_count = sim
+            .entities
+            .iter()
+            .filter(|e| e.state != AiState::Dead)
+            .count();
+        assert!(
+            active_count >= 50,
+            "Most entities should still be alive after 10 ticks"
+        );
+
         for entity in &sim.entities {
             if entity.state != AiState::Dead {
-                assert!(entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
-                       "Entity x position should be within world bounds");
-                assert!(entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
-                       "Entity y position should be within world bounds");
+                assert!(
+                    entity.position_x >= -1250.0 && entity.position_x <= 1250.0,
+                    "Entity x position should be within world bounds"
+                );
+                assert!(
+                    entity.position_y >= -1250.0 && entity.position_y <= 1250.0,
+                    "Entity y position should be within world bounds"
+                );
             }
         }
     }
@@ -1277,23 +1435,35 @@ mod tests {
         // Test that the simulation remains deterministic with 500x500 grid
         let mut sim1 = Simulation::new(50);
         let mut sim2 = Simulation::new(50);
-        
+
         // Run both simulations for same number of steps
         for _ in 0..20 {
             sim1.step();
             sim2.step();
         }
-        
+
         // Verify entities in both simulations are in identical states
         for i in 0..50 {
-            assert_eq!(sim1.entities[i].state, sim2.entities[i].state,
-                      "Entity {} state should be identical", i);
-            assert_eq!(sim1.entities[i].health, sim2.entities[i].health,
-                      "Entity {} health should be identical", i);
-            assert_eq!(sim1.entities[i].position_x, sim2.entities[i].position_x,
-                      "Entity {} position_x should be identical", i);
-            assert_eq!(sim1.entities[i].position_y, sim2.entities[i].position_y,
-                      "Entity {} position_y should be identical", i);
+            assert_eq!(
+                sim1.entities[i].state, sim2.entities[i].state,
+                "Entity {} state should be identical",
+                i
+            );
+            assert_eq!(
+                sim1.entities[i].health, sim2.entities[i].health,
+                "Entity {} health should be identical",
+                i
+            );
+            assert_eq!(
+                sim1.entities[i].position_x, sim2.entities[i].position_x,
+                "Entity {} position_x should be identical",
+                i
+            );
+            assert_eq!(
+                sim1.entities[i].position_y, sim2.entities[i].position_y,
+                "Entity {} position_y should be identical",
+                i
+            );
         }
     }
 }

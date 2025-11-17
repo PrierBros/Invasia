@@ -25,7 +25,7 @@ export default defineConfig({
   /* Shared settings for all the projects below */
   use: {
     /* Base URL to use in actions like `await page.goto('/')` */
-    baseURL: 'http://localhost:4321/Invasia',
+    baseURL: 'http://localhost:4321/Invasia/',
     
     /* Collect trace when retrying the failed test */
     trace: 'on-first-retry',
@@ -45,7 +45,7 @@ export default defineConfig({
   /* Run local dev server before starting the tests */
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:4321',
+    url: 'http://localhost:4321/Invasia',
     reuseExistingServer: !process.env.CI,
     timeout: 180000, // 3 minutes for WASM compilation and initial build
   },

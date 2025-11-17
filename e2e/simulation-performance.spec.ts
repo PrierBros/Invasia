@@ -10,13 +10,15 @@ test.describe('Simulation Performance Tests', () => {
   
   test('should load simulation page and verify basic functionality', async ({ page }) => {
     // Navigate to the simulation page
-    await page.goto('/simulation');
+    await page.goto('./simulation');
     
     // Wait for the page to be fully loaded
     await page.waitForLoadState('networkidle');
     
     // Verify page title exists
-    await expect(page.locator('h1')).toContainText('AI Simulation');
+    await expect(
+      page.getByRole('heading', { name: 'AI Simulation', level: 1 })
+    ).toBeVisible();
     
     console.log('✓ Simulation page loaded successfully');
   });
@@ -28,7 +30,7 @@ test.describe('Simulation Performance Tests', () => {
     console.log('\n=== E2E Performance Test: 10,000 Elements ===');
     
     // Navigate to the simulation page
-    await page.goto('/simulation');
+    await page.goto('./simulation');
     await page.waitForLoadState('networkidle');
     
     // Wait for WASM to load (it's loaded dynamically)
@@ -51,7 +53,12 @@ test.describe('Simulation Performance Tests', () => {
     }
     
     // Start the simulation
-    const startButton = page.locator('button').filter({ hasText: /^Start$/i }).first();
+    const startButton = page
+      .locator('.controls button')
+      .filter({ hasText: /Start/i })
+      .first();
+    await startButton.waitFor({ state: 'visible' });
+    await expect(startButton).toBeEnabled({ timeout: 10000 });
     await startButton.click();
     await page.waitForTimeout(500);
     console.log('✓ Simulation started');
@@ -148,7 +155,7 @@ test.describe('Simulation Performance Tests', () => {
   test('should benchmark performance at different entity counts', async ({ page }) => {
     console.log('\n=== E2E Benchmark: Performance Scaling ===');
     
-    await page.goto('/simulation');
+    await page.goto('./simulation');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
@@ -169,7 +176,12 @@ test.describe('Simulation Performance Tests', () => {
       await page.waitForTimeout(1000);
       
       // Start simulation
-      const startButton = page.locator('button').filter({ hasText: /^Start$/i }).first();
+      const startButton = page
+        .locator('.controls button')
+        .filter({ hasText: /Start/i })
+        .first();
+      await startButton.waitFor({ state: 'visible' });
+      await expect(startButton).toBeEnabled({ timeout: 10000 });
       await startButton.click();
       await page.waitForTimeout(3000); // Let it stabilize
       
@@ -255,17 +267,20 @@ test.describe('Simulation Performance Tests', () => {
   test('should display entity count and simulation controls', async ({ page }) => {
     console.log('\n=== E2E Test: UI Elements ===');
     
-    await page.goto('/simulation');
+    await page.goto('./simulation');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
     // Verify input exists
-    const entityCountInput = page.locator('input[type="number"]').first();
-    await expect(entityCountInput).toBeVisible();
-    console.log('✓ Entity count input is visible');
+    const entityCountSlider = page.locator('input[type="range"]').first();
+    await expect(entityCountSlider).toBeVisible();
+    console.log('✓ Entity count slider is visible');
     
     // Verify start button exists
-    const startButton = page.locator('button').filter({ hasText: /Start/i }).first();
+    const startButton = page
+      .locator('.controls button')
+      .filter({ hasText: /Start/i })
+      .first();
     await expect(startButton).toBeVisible();
     console.log('✓ Start button is visible');
     
