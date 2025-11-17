@@ -1,6 +1,25 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+#[cfg(target_arch = "wasm32")]
+use js_sys::Float32Array;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static PERFORMANCE: Option<web_sys::Performance> =
+        web_sys::window().and_then(|w| w.performance());
+}
+
+#[cfg(target_arch = "wasm32")]
+fn performance_now() -> f64 {
+    PERFORMANCE.with(|perf| perf.as_ref().map(|p| p.now()).unwrap_or(0.0))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn performance_now() -> f64 {
+    0.0
+}
+
 // AI Decision Scoring System modules
 mod decision_scoring;
 pub use decision_scoring::*;
@@ -151,8 +170,9 @@ impl AiEntity {
         &mut self,
         _tick: u64,
         self_index: usize,
+        self_snapshot: EntitySnapshot,
         entity_snapshots: &[EntitySnapshot],
-        neighbor_indices: &[usize],
+        grid: &SpatialGrid,
     ) {
         // Early return for dead entities
         if self.state == AiState::Dead {
@@ -219,29 +239,33 @@ impl AiEntity {
         // Apply combat damage from nearby Active entities
         // Note: All neighbors from spatial grid are Active entities
         let mut total_damage = 0.0;
-        for &other_index in neighbor_indices {
-            if other_index == self_index {
-                continue;
-            }
-            let other = &entity_snapshots[other_index];
-            // Spatial grid only contains Active entities, so no need to check state
-            debug_assert_eq!(
-                other.state,
-                AiState::Active,
-                "Spatial grid should only contain Active entities"
-            );
+        grid.for_each_neighbor(
+            self_snapshot.position_x,
+            self_snapshot.position_y,
+            |other_index| {
+                if other_index == self_index {
+                    return;
+                }
+                // Safety: neighbor indices come from spatial grid which only holds valid entries
+                debug_assert!(other_index < entity_snapshots.len());
+                let other = unsafe { entity_snapshots.get_unchecked(other_index) };
+                // Spatial grid only contains Active entities, so no need to check state
+                debug_assert_eq!(
+                    other.state,
+                    AiState::Active,
+                    "Spatial grid should only contain Active entities"
+                );
 
-            let dx = self.position_x - other.position_x;
-            let dy = self.position_y - other.position_y;
-            let dist_sq = dx * dx + dy * dy;
+                let dx = self.position_x - other.position_x;
+                let dy = self.position_y - other.position_y;
+                let dist_sq = dx * dx + dy * dy;
 
-            // Use squared distance to avoid sqrt in hot loop
-            if dist_sq < 100.0 && dist_sq > 0.01 {
-                // 10.0^2 = 100.0, 0.1^2 = 0.01
-                let damage = (other.military_strength / 100.0) * 0.5 * variation;
-                total_damage += damage;
-            }
-        }
+                if dist_sq < 100.0 && dist_sq > 0.01 {
+                    let damage = (other.military_strength / 100.0) * 0.5 * variation;
+                    total_damage += damage;
+                }
+            },
+        );
 
         // Apply damage to health
         if total_damage > 0.0 {
@@ -272,6 +296,43 @@ impl From<&AiEntity> for EntitySnapshot {
     }
 }
 
+const SNAPSHOT_FIELD_COUNT: usize = 8; // id, health, military, money, territory, state, pos_x, pos_y
+
+impl Simulation {
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn ensure_flat_snapshot_capacity(&mut self) {
+        let required_len = self.entities.len() * SNAPSHOT_FIELD_COUNT;
+        if self.flat_snapshot.len() != required_len {
+            self.flat_snapshot.resize(required_len, 0.0);
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn rebuild_flat_snapshot(&mut self) {
+        self.ensure_flat_snapshot_capacity();
+        for (i, entity) in self.entities.iter().enumerate() {
+            let base = i * SNAPSHOT_FIELD_COUNT;
+            self.flat_snapshot[base] = entity.id as f32;
+            self.flat_snapshot[base + 1] = entity.health;
+            self.flat_snapshot[base + 2] = entity.military_strength;
+            self.flat_snapshot[base + 3] = entity.money;
+            self.flat_snapshot[base + 4] = entity.territory;
+            let state_value: u32 = entity.state.into();
+            self.flat_snapshot[base + 5] = state_value as f32;
+            self.flat_snapshot[base + 6] = entity.position_x;
+            self.flat_snapshot[base + 7] = entity.position_y;
+        }
+        self.flat_snapshot_dirty = false;
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    fn ensure_flat_snapshot_ready(&mut self) {
+        if self.flat_snapshot_dirty {
+            self.rebuild_flat_snapshot();
+        }
+    }
+}
+
 // Optimized spatial grid using fixed-size grid array instead of HashMap
 // For 10K entities distributed across reasonable space, we can use a bounded grid
 // Grid covers world bounds [-1250, 1250) with cell_size=5.0 giving 500x500 cells
@@ -282,12 +343,13 @@ const MAX_ENTITIES_PER_CELL: usize = 4; // Allow small clusters of Active entiti
 
 struct SpatialGrid {
     cell_size: f32,
-    search_radius: f32,
+    _search_radius: f32,
     // Fixed-size grid: each cell stores indices and count
     cells: Vec<([usize; MAX_ENTITIES_PER_CELL], usize)>,
     grid_min: (i32, i32),
     grid_max: (i32, i32),
     overflow_count: usize, // Track how many entities couldn't be added due to cell capacity
+    neighbor_offsets: Vec<(i32, i32)>,
 }
 
 impl SpatialGrid {
@@ -296,13 +358,22 @@ impl SpatialGrid {
         let mut cells = Vec::with_capacity(capacity);
         cells.resize(capacity, ([0; MAX_ENTITIES_PER_CELL], 0));
 
+        let range = (search_radius / cell_size).ceil() as i32;
+        let mut neighbor_offsets = Vec::with_capacity(((range * 2) + 1).pow(2) as usize);
+        for dx in -range..=range {
+            for dy in -range..=range {
+                neighbor_offsets.push((dx, dy));
+            }
+        }
+
         Self {
             cell_size,
-            search_radius,
+            _search_radius: search_radius,
             cells,
             grid_min: (-(GRID_SIZE as i32 / 2), -(GRID_SIZE as i32 / 2)),
             grid_max: (GRID_SIZE as i32 / 2, GRID_SIZE as i32 / 2),
             overflow_count: 0,
+            neighbor_offsets,
         }
     }
 
@@ -378,14 +449,16 @@ impl SpatialGrid {
         }
     }
 
-    fn query_neighbors(&self, x: f32, y: f32, buffer: &mut Vec<usize>) {
+    fn for_each_neighbor<F>(&self, x: f32, y: f32, mut f: F)
+    where
+        F: FnMut(usize),
+    {
         let (cx, cy) = self.cell_coords(x, y);
-        let range = (self.search_radius / self.cell_size).ceil() as i32;
-        for dx in -range..=range {
-            for dy in -range..=range {
-                if let Some(cell_idx) = self.cell_index(cx + dx, cy + dy) {
-                    let cell = &self.cells[cell_idx];
-                    buffer.extend_from_slice(&cell.0[..cell.1]);
+        for &(dx, dy) in &self.neighbor_offsets {
+            if let Some(cell_idx) = self.cell_index(cx + dx, cy + dy) {
+                let cell = &self.cells[cell_idx];
+                for &entity_idx in &cell.0[..cell.1] {
+                    f(entity_idx);
                 }
             }
         }
@@ -401,17 +474,16 @@ pub struct Simulation {
     entity_count: usize,
     tick_rate: u32,
     grid: SpatialGrid,
-    // Pre-allocated reusable buffers to avoid allocations in hot path
-    neighbor_buffer: Vec<usize>,
     snapshot_buffer: Vec<EntitySnapshot>,
     // Buffers for death/resource processing
     resource_transfers: Vec<(usize, f32, f32)>, // Changed to use indices instead of IDs
     dead_indices: Vec<usize>,
-    attacker_search_buffer: Vec<usize>, // Separate buffer for finding attackers during death processing
     // Performance tracking
     last_tick_duration_ms: f64,
     last_snapshot_duration_ms: f64,
     snapshot_dirty: bool, // Flag to track if snapshot needs updating
+    flat_snapshot: Vec<f32>,
+    flat_snapshot_dirty: bool,
 }
 
 #[wasm_bindgen]
@@ -431,14 +503,14 @@ impl Simulation {
             entity_count,
             tick_rate: 60, // Default 60 ticks per second
             grid: SpatialGrid::new(5.0, 10.0),
-            neighbor_buffer: Vec::with_capacity(256), // Pre-allocate for neighbors
             snapshot_buffer: Vec::with_capacity(entity_count),
             resource_transfers: Vec::with_capacity(128),
             dead_indices: Vec::with_capacity(128),
-            attacker_search_buffer: Vec::with_capacity(256),
             last_tick_duration_ms: 0.0,
             last_snapshot_duration_ms: 0.0,
             snapshot_dirty: true,
+            flat_snapshot: Vec::with_capacity(entity_count * SNAPSHOT_FIELD_COUNT),
+            flat_snapshot_dirty: true,
         }
     }
 
@@ -475,34 +547,21 @@ impl Simulation {
         self.running = false;
         self.entities.clear();
         self.grid.clear();
-        self.neighbor_buffer.clear();
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
         self.dead_indices.clear();
-        self.attacker_search_buffer.clear();
+        self.flat_snapshot.clear();
         for i in 0..self.entity_count {
             self.entities.push(AiEntity::new(i as u32));
         }
         self.snapshot_dirty = true;
+        self.flat_snapshot_dirty = true;
     }
 
     /// Perform one simulation tick (update all entities)
     #[wasm_bindgen]
     pub fn step(&mut self) {
-        #[allow(unused_variables)]
-        let start = {
-            #[cfg(target_arch = "wasm32")]
-            {
-                web_sys::window()
-                    .and_then(|w| w.performance())
-                    .map(|p| p.now())
-                    .unwrap_or(0.0)
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                0.0
-            }
-        };
+        let start = performance_now();
 
         self.tick = self.tick.wrapping_add(1); // Reuse snapshot buffer - capacity is pre-allocated in constructor
         self.snapshot_buffer.clear();
@@ -512,25 +571,21 @@ impl Simulation {
 
         self.grid.rebuild(&self.snapshot_buffer);
 
-        // Update entities using pre-allocated neighbor buffer
         let entities_len = self.entities.len();
         for i in 0..entities_len {
-            self.neighbor_buffer.clear();
-
             // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.snapshot_buffer.len());
             let entity_snapshot = unsafe { *self.snapshot_buffer.get_unchecked(i) };
-
-            self.grid.query_neighbors(
-                entity_snapshot.position_x,
-                entity_snapshot.position_y,
-                &mut self.neighbor_buffer,
-            );
-
             // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked_mut(i) };
-            entity.update(self.tick, i, &self.snapshot_buffer, &self.neighbor_buffer);
+            entity.update(
+                self.tick,
+                i,
+                entity_snapshot,
+                &self.snapshot_buffer,
+                &self.grid,
+            );
         }
 
         // Process deaths and transfer resources using pre-allocated buffers
@@ -553,22 +608,15 @@ impl Simulation {
                     let mut nearest_attacker_idx: Option<usize> = None;
                     let mut nearest_dist_sq = f32::INFINITY;
 
-                    // Use spatial grid to find nearby attackers more efficiently
-                    // Using separate buffer to avoid confusion with neighbor_buffer
-                    self.attacker_search_buffer.clear();
-                    self.grid.query_neighbors(
-                        entity.position_x,
-                        entity.position_y,
-                        &mut self.attacker_search_buffer,
-                    );
-
-                    for &idx in &self.attacker_search_buffer {
-                        if idx != i {
+                    self.grid
+                        .for_each_neighbor(entity.position_x, entity.position_y, |idx| {
+                            if idx == i {
+                                return;
+                            }
                             // Safety: idx comes from spatial grid which only contains valid entity indices
                             debug_assert!(idx < self.entities.len());
                             let other = unsafe { self.entities.get_unchecked(idx) };
 
-                            // Spatial grid only contains Active entities, so no need to check state
                             debug_assert_eq!(
                                 other.state,
                                 AiState::Active,
@@ -583,8 +631,7 @@ impl Simulation {
                                 nearest_dist_sq = dist_sq;
                                 nearest_attacker_idx = Some(idx);
                             }
-                        }
-                    }
+                        });
 
                     // Record transfer if attacker found
                     if let Some(attacker_idx) = nearest_attacker_idx {
@@ -621,11 +668,11 @@ impl Simulation {
 
         // Mark snapshot as dirty since we've updated entities
         self.snapshot_dirty = true;
+        self.flat_snapshot_dirty = true;
 
-        // Record timing
-        #[cfg(target_arch = "wasm32")]
-        if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
-            self.last_tick_duration_ms = perf.now() - start;
+        let end = performance_now();
+        if start > 0.0 && end >= start {
+            self.last_tick_duration_ms = end - start;
         }
     }
 
@@ -682,30 +729,29 @@ impl Simulation {
             return JsValue::NULL; // Signal no update needed
         }
 
-        #[allow(unused_variables)]
-        let start = {
-            #[cfg(target_arch = "wasm32")]
-            {
-                web_sys::window()
-                    .and_then(|w| w.performance())
-                    .map(|p| p.now())
-                    .unwrap_or(0.0)
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                0.0
-            }
-        };
+        let start = performance_now();
 
         let result = serde_wasm_bindgen::to_value(&self.entities).unwrap_or(JsValue::NULL);
 
-        #[cfg(target_arch = "wasm32")]
-        if let Some(perf) = web_sys::window().and_then(|w| w.performance()) {
-            self.last_snapshot_duration_ms = perf.now() - start;
+        let end = performance_now();
+        if start > 0.0 && end >= start {
+            self.last_snapshot_duration_ms = end - start;
         }
 
         self.snapshot_dirty = false;
         result
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[wasm_bindgen]
+    pub fn get_flat_snapshot(&mut self) -> Float32Array {
+        let start = performance_now();
+        self.ensure_flat_snapshot_ready();
+        let end = performance_now();
+        if start > 0.0 && end >= start {
+            self.last_snapshot_duration_ms = end - start;
+        }
+        unsafe { Float32Array::view(&self.flat_snapshot) }
     }
 
     /// Get last tick duration in milliseconds
@@ -727,11 +773,11 @@ impl Simulation {
         self.entities.clear();
         self.tick = 0;
         self.grid.clear();
-        self.neighbor_buffer.clear();
         self.snapshot_buffer.clear();
         self.resource_transfers.clear();
         self.dead_indices.clear();
-        self.attacker_search_buffer.clear();
+        self.flat_snapshot.clear();
+        self.flat_snapshot_dirty = true;
     }
 }
 
@@ -756,8 +802,11 @@ mod tests {
     #[test]
     fn test_ai_entity_update() {
         let mut entity = AiEntity::new(0);
-        let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, 0, &snapshots, &[]);
+        let snapshot = EntitySnapshot::from(&entity);
+        let snapshots = vec![snapshot];
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        entity.update(1, 0, snapshot, &snapshots, &grid);
         // Military strength should change after update (may increase or decrease depending on state)
         // Just verify the update doesn't crash
         assert!(entity.military_strength >= 0.0 && entity.military_strength <= 100.0);
@@ -876,18 +925,10 @@ mod tests {
         let snapshots: Vec<EntitySnapshot> = entities.iter().map(EntitySnapshot::from).collect();
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        let mut neighbors = Vec::new();
 
         // Update all entities for the same tick using spatial grid neighbors
         for i in 0..entities.len() {
-            neighbors.clear();
-            grid.query_neighbors(
-                snapshots[i].position_x,
-                snapshots[i].position_y,
-                &mut neighbors,
-            );
-            neighbors.retain(|&idx| idx != i);
-            entities[i].update(1, i, &snapshots, &neighbors);
+            entities[i].update(1, i, snapshots[i], &snapshots, &grid);
         }
 
         // Print military strength values for debugging
@@ -948,16 +989,9 @@ mod tests {
             EntitySnapshot::from(&entity1),
             EntitySnapshot::from(&entity2),
         ];
-        let mut neighbors = Vec::new();
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        grid.query_neighbors(
-            snapshots[0].position_x,
-            snapshots[0].position_y,
-            &mut neighbors,
-        );
-        neighbors.retain(|&idx| idx != 0);
-        entity1.update(1, 0, &snapshots, &neighbors);
+        entity1.update(1, 0, snapshots[0], &snapshots, &grid);
 
         // Health should have decreased due to being attacked
         assert!(
@@ -977,8 +1011,11 @@ mod tests {
         let initial_territory = entity.territory;
 
         // Update entity (alone, no combat)
-        let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, 0, &snapshots, &[]);
+        let snapshot = EntitySnapshot::from(&entity);
+        let snapshots = vec![snapshot];
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        entity.update(1, 0, snapshot, &snapshots, &grid);
 
         // Territory should have increased
         assert!(
@@ -997,8 +1034,11 @@ mod tests {
         let initial_health = entity.health;
 
         // Update with no nearby entities
-        let snapshots = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, 0, &snapshots, &[]);
+        let snapshot = EntitySnapshot::from(&entity);
+        let snapshots = vec![snapshot];
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        entity.update(1, 0, snapshot, &snapshots, &grid);
 
         // Health should regenerate when safe
         assert!(
@@ -1071,8 +1111,11 @@ mod tests {
         entity.money = 0.0;
         entity.territory = 0.0;
 
-        let snapshots: Vec<EntitySnapshot> = vec![EntitySnapshot::from(&entity)];
-        entity.update(1, 0, &snapshots, &[]);
+        let snapshot = EntitySnapshot::from(&entity);
+        let snapshots: Vec<EntitySnapshot> = vec![snapshot];
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        entity.update(1, 0, snapshot, &snapshots, &grid);
 
         // All stats should remain at zero
         assert_eq!(entity.state, AiState::Dead, "Dead entity should stay dead");
@@ -1105,7 +1148,9 @@ mod tests {
             EntitySnapshot::from(&entity),
             EntitySnapshot::from(&dead_attacker),
         ];
-        entity.update(1, 0, &snapshots, &[]);
+        let mut grid = SpatialGrid::new(5.0, 10.0);
+        grid.rebuild(&snapshots);
+        entity.update(1, 0, snapshots[0], &snapshots, &grid);
 
         // Health should not decrease from dead attacker
         assert!(
@@ -1375,7 +1420,8 @@ mod tests {
 
         // Query neighbors near entity 0 (should only find other Active entities)
         let mut neighbors = Vec::new();
-        sim.grid.query_neighbors(0.0, 0.0, &mut neighbors);
+        sim.grid
+            .for_each_neighbor(0.0, 0.0, |idx| neighbors.push(idx));
 
         // Verify all neighbors are from Active entities
         for &idx in &neighbors {
