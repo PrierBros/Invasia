@@ -125,7 +125,10 @@ impl AiEntity {
         x ^= x << 13;
         x ^= x >> 17;
         x ^= x << 5;
-        self.rng_state = x.max(1); // Prevent zero lock-up
+        if x == 0 {
+            x = 1;
+        }
+        self.rng_state = x; // Prevent zero lock-up
         const INV_U32_MAX: f32 = 1.0 / (u32::MAX as f32);
         (self.rng_state as f32) * INV_U32_MAX
     }
