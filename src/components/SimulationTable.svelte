@@ -29,8 +29,27 @@
   let wasmLoaded: boolean = false;
   let error: string | null = null;
   
+  const ENTITY_FIELD_COUNT = 8;
+  const FIELD_INDEX = {
+    id: 0,
+    health: 1,
+    military_strength: 2,
+    money: 3,
+    territory: 4,
+    state: 5,
+    position_x: 6,
+    position_y: 7,
+  } as const;
+  const STATE_DEAD = 4;
+
   // Simulation data
-  let entities: AiEntity[] = [];
+  let entityDataView: Float32Array | null = null;
+  let totalEntitiesCount: number = 0;
+  let filteredEntityCount: number = 0;
+  let currentListLength: number = 0;
+  let visibleEntities: AiEntity[] = [];
+  let topPadding: number = 0;
+  let bottomPadding: number = 0;
   let tick: number = 0;
   let isRunning: boolean = false;
   
@@ -65,19 +84,94 @@
   let visibleEndIndex: number = 50; // Show 50 rows at a time
   let tableScrollTop: number = 0;
   const rowHeight: number = 45; // Approximate row height in pixels
-  
+
   function handleTableScroll(event: Event): void {
     const target = event.target as HTMLElement;
     tableScrollTop = target.scrollTop;
-    
-    // Calculate visible range with buffer
+
     const buffer = 10; // Extra rows above/below for smooth scrolling
-    visibleStartIndex = Math.max(0, Math.floor(tableScrollTop / rowHeight) - buffer);
-    visibleEndIndex = Math.min(
-      filteredEntities.length,
-      Math.ceil((tableScrollTop + target.clientHeight) / rowHeight) + buffer
-    );
+    const listLength = hideDeadAIs ? filteredEntityCount : totalEntitiesCount;
+    const start = Math.max(0, Math.floor(tableScrollTop / rowHeight) - buffer);
+    const viewportEnd = Math.ceil((tableScrollTop + target.clientHeight) / rowHeight) + buffer;
+    visibleStartIndex = start;
+    visibleEndIndex = Math.min(listLength, viewportEnd);
   }
+
+  function extractEntity(dataView: Float32Array, index: number): AiEntity {
+    const base = index * ENTITY_FIELD_COUNT;
+    return {
+      id: Number(dataView[base + FIELD_INDEX.id]),
+      health: dataView[base + FIELD_INDEX.health],
+      military_strength: dataView[base + FIELD_INDEX.military_strength],
+      money: dataView[base + FIELD_INDEX.money],
+      territory: dataView[base + FIELD_INDEX.territory],
+      state: Number(dataView[base + FIELD_INDEX.state]),
+      position_x: dataView[base + FIELD_INDEX.position_x],
+      position_y: dataView[base + FIELD_INDEX.position_y],
+    };
+  }
+
+  function rebuildVisibleEntities(
+    dataView: Float32Array | null,
+    hideDead: boolean,
+    startIndex: number,
+    endIndex: number,
+    totalCount: number
+  ): void {
+    if (!dataView || totalCount === 0) {
+      visibleEntities = [];
+      filteredEntityCount = 0;
+      currentListLength = 0;
+      topPadding = 0;
+      bottomPadding = 0;
+      return;
+    }
+
+    const clampedStart = Math.max(0, Math.min(startIndex, totalCount));
+    const clampedEnd = Math.max(clampedStart, Math.min(endIndex, totalCount));
+
+    if (!hideDead) {
+      filteredEntityCount = totalCount;
+      currentListLength = totalCount;
+      const buffer: AiEntity[] = [];
+      for (let idx = clampedStart; idx < clampedEnd; idx += 1) {
+        buffer.push(extractEntity(dataView, idx));
+      }
+      visibleEntities = buffer;
+      topPadding = clampedStart * rowHeight;
+      bottomPadding = Math.max(0, (filteredEntityCount - clampedEnd) * rowHeight);
+      return;
+    }
+
+    let filteredIndex = 0;
+    const buffer: AiEntity[] = [];
+    for (let idx = 0; idx < totalCount; idx += 1) {
+      const stateValue = dataView[idx * ENTITY_FIELD_COUNT + FIELD_INDEX.state];
+      if (stateValue === STATE_DEAD) {
+        continue;
+      }
+      if (filteredIndex >= clampedStart && filteredIndex < clampedEnd) {
+        buffer.push(extractEntity(dataView, idx));
+      }
+      filteredIndex += 1;
+    }
+
+    filteredEntityCount = filteredIndex;
+    currentListLength = filteredEntityCount;
+    const effectiveStart = Math.min(clampedStart, filteredEntityCount);
+    const effectiveEnd = Math.min(clampedEnd, filteredEntityCount);
+    visibleEntities = buffer;
+    topPadding = effectiveStart * rowHeight;
+    bottomPadding = Math.max(0, (filteredEntityCount - effectiveEnd) * rowHeight);
+  }
+
+  $: rebuildVisibleEntities(
+    entityDataView,
+    hideDeadAIs,
+    visibleStartIndex,
+    visibleEndIndex,
+    totalEntitiesCount
+  );
 
   // Load the WASM module on component mount
   onMount(async () => {
@@ -278,29 +372,19 @@
       avgSnapshotDuration = avgSnapshotDuration + (snapshotDuration - avgSnapshotDuration) / Math.min(durationSampleCount, 100);
     }
     
-    const snapshot = simulation.get_snapshot();
-    
-    // Only update entities if snapshot is not null (data changed)
-    if (snapshot !== null && snapshot !== undefined) {
-      entities = snapshot || [];
+    const flatSnapshot = simulation.get_flat_snapshot();
+    if (flatSnapshot) {
+      entityDataView = flatSnapshot;
+      totalEntitiesCount = Math.floor(flatSnapshot.length / ENTITY_FIELD_COUNT);
+    } else {
+      entityDataView = null;
+      totalEntitiesCount = 0;
     }
   }
 
   function formatNumber(num: number): string {
     return num.toFixed(2);
   }
-  
-  // Filtered entities based on hideDeadAIs state
-  $: filteredEntities = hideDeadAIs 
-    ? entities.filter(entity => getStateName(entity.state) !== 'Dead')
-    : entities;
-  
-  // Visible entities for virtual scrolling (only render what's on screen)
-  $: visibleEntities = filteredEntities.slice(visibleStartIndex, visibleEndIndex);
-  
-  // Calculate padding for virtual scroll
-  $: topPadding = visibleStartIndex * rowHeight;
-  $: bottomPadding = Math.max(0, (filteredEntities.length - visibleEndIndex) * rowHeight);
 </script>
 
 <div class="simulation-container">
@@ -414,7 +498,13 @@
 
     <div class="stats">
       <p><strong>Tick:</strong> {tick}</p>
-      <p><strong>Entities:</strong> {filteredEntities.length}{#if hideDeadAIs} / {entities.length}{/if}</p>
+      <p>
+        <strong>Entities:</strong>
+        {hideDeadAIs ? filteredEntityCount : totalEntitiesCount}
+        {#if hideDeadAIs}
+          / {totalEntitiesCount}
+        {/if}
+      </p>
       <p><strong>Status:</strong> {isRunning ? '🟢 Running' : '🔴 Paused'}</p>
       <div class="performance-metrics">
         <p><strong>Target Tick Rate:</strong> {tickRate} Hz</p>
