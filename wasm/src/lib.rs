@@ -73,6 +73,29 @@ pub struct AiEntity {
 }
 
 impl AiEntity {
+    /// Number of fields serialized to flat snapshot
+    pub const FLAT_FIELD_COUNT: usize = 8;
+
+    /// Write entity fields to a flat array slice
+    /// Returns the number of fields written (should equal FLAT_FIELD_COUNT)
+    #[inline]
+    fn write_to_flat_slice(&self, slice: &mut [f32]) -> usize {
+        debug_assert!(slice.len() >= Self::FLAT_FIELD_COUNT, 
+            "Slice must have at least {} elements", Self::FLAT_FIELD_COUNT);
+        
+        slice[0] = self.id as f32;
+        slice[1] = self.health;
+        slice[2] = self.military_strength;
+        slice[3] = self.money;
+        slice[4] = self.territory;
+        let state_value: u32 = self.state.into();
+        slice[5] = state_value as f32;
+        slice[6] = self.position_x;
+        slice[7] = self.position_y;
+        
+        Self::FLAT_FIELD_COUNT
+    }
+
     /// Create a new AI entity with default values
     /// Grid size is 500x500 cells with cell_size=5.0, so world is [-1250, 1250)
     /// Entities spawn distributed across the grid to avoid clustering
@@ -296,12 +319,10 @@ impl From<&AiEntity> for EntitySnapshot {
     }
 }
 
-const SNAPSHOT_FIELD_COUNT: usize = 8; // id, health, military, money, territory, state, pos_x, pos_y
-
 impl Simulation {
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
     fn ensure_flat_snapshot_capacity(&mut self) {
-        let required_len = self.entities.len() * SNAPSHOT_FIELD_COUNT;
+        let required_len = self.entities.len() * AiEntity::FLAT_FIELD_COUNT;
         if self.flat_snapshot.len() != required_len {
             self.flat_snapshot.resize(required_len, 0.0);
         }
@@ -311,16 +332,8 @@ impl Simulation {
     fn rebuild_flat_snapshot(&mut self) {
         self.ensure_flat_snapshot_capacity();
         for (i, entity) in self.entities.iter().enumerate() {
-            let base = i * SNAPSHOT_FIELD_COUNT;
-            self.flat_snapshot[base] = entity.id as f32;
-            self.flat_snapshot[base + 1] = entity.health;
-            self.flat_snapshot[base + 2] = entity.military_strength;
-            self.flat_snapshot[base + 3] = entity.money;
-            self.flat_snapshot[base + 4] = entity.territory;
-            let state_value: u32 = entity.state.into();
-            self.flat_snapshot[base + 5] = state_value as f32;
-            self.flat_snapshot[base + 6] = entity.position_x;
-            self.flat_snapshot[base + 7] = entity.position_y;
+            let base = i * AiEntity::FLAT_FIELD_COUNT;
+            entity.write_to_flat_slice(&mut self.flat_snapshot[base..]);
         }
         self.flat_snapshot_dirty = false;
     }
@@ -509,7 +522,7 @@ impl Simulation {
             last_tick_duration_ms: 0.0,
             last_snapshot_duration_ms: 0.0,
             snapshot_dirty: true,
-            flat_snapshot: Vec::with_capacity(entity_count * SNAPSHOT_FIELD_COUNT),
+            flat_snapshot: Vec::with_capacity(entity_count * AiEntity::FLAT_FIELD_COUNT),
             flat_snapshot_dirty: true,
         }
     }
