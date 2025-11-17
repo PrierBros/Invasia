@@ -34,9 +34,10 @@
   let tick: number = 0;
   let isRunning: boolean = false;
   
-  // Configuration
-  let entityCount: number = 100;
-  let tickRate: number = 60;
+  // Configuration - optimized for all devices (mobile as baseline)
+  let entityCount: number = 250;
+  let tickRate: number = 30;
+  let renderRate: number = 30; // Manual control of render FPS
   
   // Performance metrics
   let actualTickRate: number = 0;
@@ -50,6 +51,25 @@
   
   // Filter state
   let hideDeadAIs: boolean = false;
+
+  // Virtual scrolling for performance
+  let visibleStartIndex: number = 0;
+  let visibleEndIndex: number = 50; // Show 50 rows at a time
+  let tableScrollTop: number = 0;
+  const rowHeight: number = 45; // Approximate row height in pixels
+  
+  function handleTableScroll(event: Event): void {
+    const target = event.target as HTMLElement;
+    tableScrollTop = target.scrollTop;
+    
+    // Calculate visible range with buffer
+    const buffer = 10; // Extra rows above/below for smooth scrolling
+    visibleStartIndex = Math.max(0, Math.floor(tableScrollTop / rowHeight) - buffer);
+    visibleEndIndex = Math.min(
+      filteredEntities.length,
+      Math.ceil((tableScrollTop + target.clientHeight) / rowHeight) + buffer
+    );
+  }
 
   // Load the WASM module on component mount
   onMount(async () => {
@@ -147,10 +167,25 @@
     updateRenderLoop();
   }
 
+  function applyPerformanceMode(): void {
+    if (!simulation || !wasmLoaded) return;
+    
+    // Performance presets (same for all devices)
+    const presets = {
+      low: { entities: 100, tickRate: 30 },
+      medium: { entities: 250, tickRate: 30 },
+      high: { entities: 500, tickRate: 30 },
+    };
+    
+    const preset = presets[performanceMode];
+    entityCount = preset.entities;
+    tickRate = preset.tickRate;
+    
+    applyConfiguration();
+  }
+
   function startRenderLoop(): void {
-    // Adaptive render rate: match tick rate but cap at 60 FPS
-    // This reduces unnecessary snapshot calls when simulation is slow
-    const renderRate = Math.min(tickRate, 60);
+    // Use configured render rate
     const renderInterval_ms = 1000 / renderRate;
     
     renderInterval = window.setInterval(() => {
@@ -213,6 +248,13 @@
   $: filteredEntities = hideDeadAIs 
     ? entities.filter(entity => getStateName(entity.state) !== 'Dead')
     : entities;
+  
+  // Visible entities for virtual scrolling (only render what's on screen)
+  $: visibleEntities = filteredEntities.slice(visibleStartIndex, visibleEndIndex);
+  
+  // Calculate padding for virtual scroll
+  $: topPadding = visibleStartIndex * rowHeight;
+  $: bottomPadding = Math.max(0, (filteredEntities.length - visibleEndIndex) * rowHeight);
 </script>
 
 <div class="simulation-container">
@@ -302,6 +344,18 @@
           />
         </label>
         
+        <label>
+          Render Rate: <span>{renderRate} FPS</span>
+          <input 
+            type="range" 
+            min="1" 
+            max="60" 
+            step="1"
+            bind:value={renderRate}
+            on:change={updateRenderLoop}
+          />
+        </label>
+        
         <button 
           on:click={applyConfiguration} 
           class="btn btn-primary"
@@ -342,7 +396,7 @@
     </div>
   </div>
 
-  <div class="table-container">
+  <div class="table-container" on:scroll={handleTableScroll}>
     <table class="entity-table">
       <thead>
         <tr>
@@ -357,7 +411,14 @@
         </tr>
       </thead>
       <tbody>
-        {#each filteredEntities as entity (entity.id)}
+        <!-- Spacer for virtual scroll top padding -->
+        {#if topPadding > 0}
+          <tr style="height: {topPadding}px; pointer-events: none;">
+            <td colspan="8"></td>
+          </tr>
+        {/if}
+        
+        {#each visibleEntities as entity (entity.id)}
           <tr>
             <td>{entity.id}</td>
             <td class="health-cell">
@@ -393,6 +454,13 @@
             </td>
           </tr>
         {/each}
+        
+        <!-- Spacer for virtual scroll bottom padding -->
+        {#if bottomPadding > 0}
+          <tr style="height: {bottomPadding}px; pointer-events: none;">
+            <td colspan="8"></td>
+          </tr>
+        {/if}
       </tbody>
     </table>
   </div>
@@ -658,7 +726,7 @@
     left: 0;
     height: 100%;
     border-radius: 0.25rem;
-    transition: width 0.3s ease;
+    /* No transitions for consistent performance across all devices */
   }
 
   .bar-health {
