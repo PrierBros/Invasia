@@ -170,7 +170,6 @@ impl AiEntity {
         &mut self,
         _tick: u64,
         self_index: usize,
-        self_snapshot: EntitySnapshot,
         entity_snapshots: &[EntitySnapshot],
         grid: &SpatialGrid,
     ) {
@@ -239,6 +238,7 @@ impl AiEntity {
         // Apply combat damage from nearby Active entities
         // Note: All neighbors from spatial grid are Active entities
         let mut total_damage = 0.0;
+        let self_snapshot = entity_snapshots[self_index];
         grid.for_each_neighbor(
             self_snapshot.position_x,
             self_snapshot.position_y,
@@ -574,15 +574,11 @@ impl Simulation {
         let entities_len = self.entities.len();
         for i in 0..entities_len {
             // Safety: i is bounded by entities_len which equals self.entities.len()
-            debug_assert!(i < self.snapshot_buffer.len());
-            let entity_snapshot = unsafe { *self.snapshot_buffer.get_unchecked(i) };
-            // Safety: i is bounded by entities_len which equals self.entities.len()
             debug_assert!(i < self.entities.len());
             let entity = unsafe { self.entities.get_unchecked_mut(i) };
             entity.update(
                 self.tick,
                 i,
-                entity_snapshot,
                 &self.snapshot_buffer,
                 &self.grid,
             );
@@ -806,7 +802,7 @@ mod tests {
         let snapshots = vec![snapshot];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity.update(1, 0, snapshot, &snapshots, &grid);
+        entity.update(1, 0, &snapshots, &grid);
         // Military strength should change after update (may increase or decrease depending on state)
         // Just verify the update doesn't crash
         assert!(entity.military_strength >= 0.0 && entity.military_strength <= 100.0);
@@ -928,7 +924,7 @@ mod tests {
 
         // Update all entities for the same tick using spatial grid neighbors
         for i in 0..entities.len() {
-            entities[i].update(1, i, snapshots[i], &snapshots, &grid);
+            entities[i].update(1, i, &snapshots, &grid);
         }
 
         // Print military strength values for debugging
@@ -991,7 +987,7 @@ mod tests {
         ];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity1.update(1, 0, snapshots[0], &snapshots, &grid);
+        entity1.update(1, 0, &snapshots, &grid);
 
         // Health should have decreased due to being attacked
         assert!(
@@ -1015,7 +1011,7 @@ mod tests {
         let snapshots = vec![snapshot];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity.update(1, 0, snapshot, &snapshots, &grid);
+        entity.update(1, 0, &snapshots, &grid);
 
         // Territory should have increased
         assert!(
@@ -1038,7 +1034,7 @@ mod tests {
         let snapshots = vec![snapshot];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity.update(1, 0, snapshot, &snapshots, &grid);
+        entity.update(1, 0, &snapshots, &grid);
 
         // Health should regenerate when safe
         assert!(
@@ -1115,7 +1111,7 @@ mod tests {
         let snapshots: Vec<EntitySnapshot> = vec![snapshot];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity.update(1, 0, snapshot, &snapshots, &grid);
+        entity.update(1, 0, &snapshots, &grid);
 
         // All stats should remain at zero
         assert_eq!(entity.state, AiState::Dead, "Dead entity should stay dead");
@@ -1150,7 +1146,7 @@ mod tests {
         ];
         let mut grid = SpatialGrid::new(5.0, 10.0);
         grid.rebuild(&snapshots);
-        entity.update(1, 0, snapshots[0], &snapshots, &grid);
+        entity.update(1, 0, &snapshots, &grid);
 
         // Health should not decrease from dead attacker
         assert!(
