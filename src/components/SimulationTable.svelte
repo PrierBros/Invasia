@@ -4,7 +4,6 @@
   // Types for AI entities
   interface AiEntity {
     id: number;
-    health: number;
     military_strength: number;
     position_x: number;
     position_y: number;
@@ -14,7 +13,7 @@
   }
 
   // State names for display
-  const stateNames = ['Idle', 'Active', 'Resting', 'Moving', 'Dead'];
+  const stateNames = ['Idle', 'Attacking', 'Defending', 'Dead'];
 
   // Helper function to get state name
   function getStateName(state: number | string): string {
@@ -29,18 +28,17 @@
   let wasmLoaded: boolean = false;
   let error: string | null = null;
   
-  const ENTITY_FIELD_COUNT = 8;
+  const ENTITY_FIELD_COUNT = 7;
   const FIELD_INDEX = {
     id: 0,
-    health: 1,
-    military_strength: 2,
-    money: 3,
-    territory: 4,
-    state: 5,
-    position_x: 6,
-    position_y: 7,
+    military_strength: 1,
+    money: 2,
+    territory: 3,
+    state: 4,
+    position_x: 5,
+    position_y: 6,
   } as const;
-  const STATE_DEAD = 4;
+  const STATE_DEAD = 3;
 
   // Simulation data
   let entityDataView: Float32Array | null = null;
@@ -57,6 +55,7 @@
   let entityCount: number = 250;
   let tickRate: number = 30;
   let renderRate: number = 30; // Manual control of render FPS
+  let gridSize: number = 50; // Grid width/height
   
   // Performance metrics
   let actualTickRate: number = 0;
@@ -101,10 +100,9 @@
     const base = index * ENTITY_FIELD_COUNT;
     return {
       id: Number(dataView[base + FIELD_INDEX.id]),
-      health: dataView[base + FIELD_INDEX.health],
       military_strength: dataView[base + FIELD_INDEX.military_strength],
       money: dataView[base + FIELD_INDEX.money],
-      territory: dataView[base + FIELD_INDEX.territory],
+      territory: Math.round(dataView[base + FIELD_INDEX.territory]),
       state: Number(dataView[base + FIELD_INDEX.state]),
       position_x: dataView[base + FIELD_INDEX.position_x],
       position_y: dataView[base + FIELD_INDEX.position_y],
@@ -261,6 +259,18 @@
     if (!simulation || !wasmLoaded) return;
     
     pauseSimulation();
+    
+    // Calculate max entities based on grid size (at least 1 space per AI, default 20 per AI)
+    const totalGridSpaces = gridSize * gridSize;
+    const maxEntities = totalGridSpaces;
+    const defaultMaxEntities = Math.floor(totalGridSpaces / 20);
+    
+    // Clamp entity count to valid range
+    if (entityCount > maxEntities) {
+      entityCount = defaultMaxEntities;
+    }
+    
+    simulation.set_grid_size(gridSize);
     simulation.set_entity_count(entityCount);
     simulation.set_tick_rate(tickRate);
     updateSnapshot();
@@ -453,11 +463,22 @@
       <h3>Configuration</h3>
       <div class="config-inputs">
         <label>
-          Entity Count: <span>{entityCount}</span>
+          Grid Size: <span>{gridSize}x{gridSize} ({gridSize * gridSize} spaces)</span>
           <input 
             type="range" 
             min="10" 
-            max="1000" 
+            max="500" 
+            step="10"
+            bind:value={gridSize}
+          />
+        </label>
+        
+        <label>
+          Entity Count: <span>{entityCount} (max: {gridSize * gridSize})</span>
+          <input 
+            type="range" 
+            min="10" 
+            max="100000" 
             step="10"
             bind:value={entityCount}
           />
@@ -468,7 +489,7 @@
           <input 
             type="range" 
             min="1" 
-            max="120" 
+            max="10000" 
             step="1"
             bind:value={tickRate}
           />
@@ -479,7 +500,7 @@
           <input 
             type="range" 
             min="1" 
-            max="60" 
+            max="1000" 
             step="1"
             bind:value={renderRate}
             on:change={updateRenderLoop}
@@ -539,7 +560,6 @@
       <thead>
         <tr>
           <th>ID</th>
-          <th>Health</th>
           <th>Military Strength</th>
           <th>Money</th>
           <th>Territory</th>
@@ -552,22 +572,16 @@
         <!-- Spacer for virtual scroll top padding -->
         {#if topPadding > 0}
           <tr style="height: {topPadding}px; pointer-events: none;">
-            <td colspan="8"></td>
+            <td colspan="7"></td>
           </tr>
         {/if}
         
         {#each visibleEntities as entity (entity.id)}
           <tr>
             <td>{entity.id}</td>
-            <td class="health-cell">
-              <div class="bar-container">
-                <div class="bar bar-health" style="width: {entity.health}%"></div>
-                <span class="bar-text">{formatNumber(entity.health)}</span>
-              </div>
-            </td>
             <td class="military-cell">
               <div class="bar-container">
-                <div class="bar bar-military" style="width: {entity.military_strength}%"></div>
+                <div class="bar bar-military" style="width: {Math.min(entity.military_strength, 100)}%"></div>
                 <span class="bar-text">{formatNumber(entity.military_strength)}</span>
               </div>
             </td>
@@ -578,10 +592,7 @@
               </div>
             </td>
             <td class="territory-cell">
-              <div class="bar-container">
-                <div class="bar bar-territory" style="width: {entity.territory}%"></div>
-                <span class="bar-text">{formatNumber(entity.territory)}</span>
-              </div>
+              {entity.territory} spaces
             </td>
             <td>{formatNumber(entity.position_x)}</td>
             <td>{formatNumber(entity.position_y)}</td>
@@ -596,7 +607,7 @@
         <!-- Spacer for virtual scroll bottom padding -->
         {#if bottomPadding > 0}
           <tr style="height: {bottomPadding}px; pointer-events: none;">
-            <td colspan="8"></td>
+            <td colspan="7"></td>
           </tr>
         {/if}
       </tbody>
@@ -910,23 +921,18 @@
   }
 
   .state-1 {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  .state-2 {
     background: #dbeafe;
     color: #1e40af;
   }
 
-  .state-2 {
-    background: #fef3c7;
-    color: #92400e;
-  }
-
   .state-3 {
-    background: #d1fae5;
-    color: #065f46;
-  }
-
-  .state-4 {
-    background: #fee2e2;
-    color: #991b1b;
+    background: #1f2937;
+    color: #f3f4f6;
   }
 
   @media (max-width: 768px) {
