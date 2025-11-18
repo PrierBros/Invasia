@@ -279,12 +279,14 @@ impl SimulationData {
             entity.territory = 0;
         }
         
-        // Count owned grid spaces for each entity
+        // Count owned grid spaces for each entity using direct indexing
+        // Since entity IDs correspond to their indices, we can use O(1) lookup
         for space in &self.grid_spaces {
             if let Some(owner_id) = space.owner_id {
-                // Find the entity with this ID
-                if let Some(entity) = self.entities.iter_mut().find(|e| e.id == owner_id) {
-                    entity.territory += 1;
+                // Directly index into entities array using owner_id
+                let idx = owner_id as usize;
+                if idx < self.entities.len() && self.entities[idx].id == owner_id {
+                    self.entities[idx].territory += 1;
                 }
             }
         }

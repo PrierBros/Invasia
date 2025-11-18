@@ -252,28 +252,45 @@ impl SimulationLogic {
             }
         }
         
-        // Collect all attacking entities and their positions
+        // Collect all attacking entities
         let mut attackers = Vec::new();
         for i in 0..entity_count {
             if let Some(entity) = self.data.entity(i) {
                 if entity.state == AiState::Attacking && entity.military_strength >= ATTACK_COST {
-                    attackers.push((i, entity.id, entity.position_x, entity.position_y, entity.military_strength));
+                    attackers.push((i, entity.id, entity.military_strength));
                 }
             }
         }
         
+        // Build a list of (grid_idx, owner_id, defense_strength) to avoid borrowing issues
+        let grid_data: Vec<(Option<u32>, f32)> = self.data.grid_spaces()
+            .iter()
+            .map(|space| (space.owner_id, space.defense_strength))
+            .collect();
+        
         // For each attacker, try to conquer an adjacent grid space
-        for (attacker_idx, attacker_id, pos_x, pos_y, military_strength) in attackers {
-            // Find the grid space the attacker is in
-            if let Some(current_grid_idx) = self.data.position_to_grid_index(pos_x, pos_y) {
-                // Try to conquer an adjacent grid space
-                let row = current_grid_idx / grid_size;
-                let col = current_grid_idx % grid_size;
+        // Check adjacency to ALL owned spaces, not just the spawn position
+        for (attacker_idx, attacker_id, military_strength) in attackers {
+            let mut conquered = false;
+            
+            // Find all grid spaces owned by this attacker
+            for grid_idx in 0..grid_data.len() {
+                if conquered {
+                    break;
+                }
+                
+                let (owner_id, _) = grid_data[grid_idx];
+                if owner_id != Some(attacker_id) {
+                    continue; // Not owned by this attacker
+                }
+                
+                // Try to conquer adjacent spaces
+                let row = grid_idx / grid_size;
+                let col = grid_idx % grid_size;
                 
                 // Check adjacent cells (4-directional)
                 let adjacent_offsets = [(-1, 0), (1, 0), (0, -1), (0, 1)];
                 
-                let mut conquered = false;
                 for (dr, dc) in adjacent_offsets {
                     if conquered {
                         break;
@@ -289,20 +306,17 @@ impl SimulationLogic {
                     let target_grid_idx = (new_row as usize) * grid_size + (new_col as usize);
                     
                     // Check if this space is owned by a different AI or unowned
-                    let (can_attack, total_defense) = if let Some(target_space) = self.data.grid_spaces().get(target_grid_idx) {
-                        if let Some(defender_id) = target_space.owner_id {
-                            if defender_id != attacker_id {
-                                let defense = ATTACK_COST + target_space.defense_strength * DEFENSE_BONUS_MULTIPLIER;
-                                (military_strength >= defense, defense)
-                            } else {
-                                (false, 0.0) // Own space
-                            }
+                    let (target_owner_id, target_defense_strength) = grid_data[target_grid_idx];
+                    let (can_attack, total_defense) = if let Some(defender_id) = target_owner_id {
+                        if defender_id != attacker_id {
+                            let defense = ATTACK_COST + target_defense_strength * DEFENSE_BONUS_MULTIPLIER;
+                            (military_strength >= defense, defense)
                         } else {
-                            // Unowned space
-                            (military_strength >= ATTACK_COST, ATTACK_COST)
+                            (false, 0.0) // Own space
                         }
                     } else {
-                        (false, 0.0)
+                        // Unowned space
+                        (military_strength >= ATTACK_COST, ATTACK_COST)
                     };
                     
                     if can_attack {
