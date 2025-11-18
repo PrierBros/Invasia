@@ -36,13 +36,19 @@ test.describe('Simulation Performance Tests', () => {
     // Wait for WASM to load (it's loaded dynamically)
     await page.waitForTimeout(3000);
     
-    // Look for entity count slider
-    const entityCountSlider = page.locator('input[type="range"]').first();
+    // Look for entity count slider (second range input after grid size)
+    const entityCountSlider = page.locator('label').filter({ hasText: /Entity Count:/i }).locator('input[type="range"]');
     
-    // Set entity count to max (1000 via slider)
+    // Set entity count to 1000
     await entityCountSlider.fill('1000');
     await page.waitForTimeout(500);
-    console.log('✓ Set entity count to 1,000 (slider max)');
+    console.log('✓ Set entity count to 1,000');
+    
+    // Set tick rate to 60 Hz to test performance
+    const tickRateSlider = page.locator('label').filter({ hasText: /Tick Rate:/i }).locator('input[type="range"]');
+    await tickRateSlider.fill('60');
+    await page.waitForTimeout(500);
+    console.log('✓ Set tick rate to 60 Hz');
     
     // Apply configuration
     const applyButton = page.locator('button').filter({ hasText: /Apply Config/i }).first();
@@ -118,9 +124,9 @@ test.describe('Simulation Performance Tests', () => {
     expect(isResponsive).toBe(true);
     console.log('✓ Page is responsive');
     
-    // Verify reasonable performance (at least 30 Hz for good UX)
-    expect(performanceData.actualTickRate).toBeGreaterThan(30);
-    console.log(`✓ Performance is acceptable (${performanceData.actualTickRate.toFixed(1)} Hz > 30 Hz)`);
+    // Verify reasonable performance (at least 50 Hz, allowing for some overhead)
+    expect(performanceData.actualTickRate).toBeGreaterThan(50);
+    console.log(`✓ Performance is acceptable (${performanceData.actualTickRate.toFixed(1)} Hz > 50 Hz)`);
     
     // Check tick counter is increasing
     const tickDisplay = page.locator('text=/Tick:?\\s*\\d+/i').first();
@@ -166,8 +172,13 @@ test.describe('Simulation Performance Tests', () => {
       console.log(`\n--- Testing with ${count} entities ---`);
       
       // Set entity count
-      const slider = page.locator('input[type="range"]').first();
+      const slider = page.locator('label').filter({ hasText: /Entity Count:/i }).locator('input[type="range"]');
       await slider.fill(count.toString());
+      await page.waitForTimeout(300);
+      
+      // Set tick rate to 60 Hz for consistent benchmarking
+      const tickRateSlider = page.locator('label').filter({ hasText: /Tick Rate:/i }).locator('input[type="range"]');
+      await tickRateSlider.fill('60');
       await page.waitForTimeout(300);
       
       // Apply config
@@ -258,9 +269,9 @@ test.describe('Simulation Performance Tests', () => {
     
     console.log('\n✓ Benchmark completed\n');
     
-    // Verify all tests met minimum performance
+    // Verify all tests met minimum performance (50 Hz with 60 Hz target)
     for (const result of results) {
-      expect(result.tickRate).toBeGreaterThan(20);
+      expect(result.tickRate).toBeGreaterThan(50);
     }
   });
   
