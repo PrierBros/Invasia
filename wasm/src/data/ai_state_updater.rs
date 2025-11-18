@@ -6,7 +6,6 @@ use super::grid_update_builder::GridUpdateBuilder;
 const MILITARY_STRENGTH_PER_SPACE_PER_SEC: f32 = 0.5;
 const MONEY_PER_SPACE_PER_SEC: f32 = 1.0;
 const ATTACK_COST_MILITARY: f32 = 10.0; // Cost to attempt conquering a grid space
-const DEFEND_BONUS_MULTIPLIER: f32 = 1.5; // Defense bonus when defending
 
 pub struct AiStateUpdater {
     current_time: f64,
