@@ -108,8 +108,9 @@ impl SimulationData {
             let spacing = (grid_area as f32 / entity_count as f32).sqrt().floor() as usize;
             let spacing = spacing.max(1);
             
-            let row = (i / (self.grid_size / spacing.max(1))) * spacing;
-            let col = (i % (self.grid_size / spacing.max(1))) * spacing;
+            let divisor = (self.grid_size / spacing).max(1);
+            let row = (i / divisor) * spacing;
+            let col = (i % divisor) * spacing;
             let grid_index = (row.min(self.grid_size - 1)) * self.grid_size + col.min(self.grid_size - 1);
             
             // Assign this grid space to the AI
