@@ -84,13 +84,27 @@ npm run preview
 
 ### Testing
 
+The project includes comprehensive test coverage:
+
 ```bash
-# Run Rust tests
+# Run all tests (Rust + E2E)
+npm test
+
+# Run Rust/WASM tests
 npm run test:wasm
 
-# Or directly with cargo
-cd wasm && cargo test
+# Run E2E tests with Playwright
+npm run test:e2e
+
+# Run E2E tests in UI mode
+npm run test:e2e:ui
 ```
+
+**Test Coverage:**
+- **Rust Unit Tests** (34 tests): Core simulation logic, AI decision scoring system
+- **E2E Tests** (8 tests): Performance benchmarks, UI validation, WebAssembly loading verification
+
+The E2E tests include specific checks for WebAssembly module loading to prevent deployment issues on GitHub Pages.
 
 ## 📦 Project Structure
 
@@ -174,6 +188,21 @@ To enable GitHub Pages for your fork:
 1. Go to repository Settings → Pages
 2. Set Source to "GitHub Actions"
 3. Push to main branch to trigger deployment
+
+### Troubleshooting WebAssembly Loading
+
+If you encounter "Failed to load WebAssembly module" errors:
+
+1. **Verify `.nojekyll` file exists**: This file in `public/` directory prevents Jekyll from processing files in `_astro/` directory on GitHub Pages.
+   
+2. **Check MIME type**: WASM files should be served with `application/wasm` or `application/octet-stream` MIME type.
+
+3. **Run tests**: The E2E test suite includes specific checks for WASM loading:
+   ```bash
+   npm run test:e2e -- e2e/wasm-loading.spec.ts
+   ```
+
+4. **Development vs Production**: The WASM module uses different import mechanisms in development (Vite dev server) vs production (static files). Both are tested by the test suite.
 
 ## 📝 License
 
