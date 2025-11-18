@@ -115,6 +115,16 @@ impl SimulationHandler {
     pub fn destroy(&mut self) {
         self.logic.destroy();
     }
+
+    #[wasm_bindgen]
+    pub fn is_complete(&self) -> bool {
+        self.logic.is_complete()
+    }
+
+    #[wasm_bindgen]
+    pub fn count_alive(&self) -> usize {
+        self.logic.count_alive()
+    }
 }
 
 #[cfg(test)]
@@ -166,5 +176,124 @@ mod tests {
         assert_eq!(handler.get_tick(), 0);
         assert_eq!(handler.get_entity_count(), 4);
         assert!(!handler.is_running());
+    }
+
+    #[test]
+    fn counts_alive_entities() {
+        let handler = SimulationHandler::new(5);
+        assert_eq!(handler.count_alive(), 5);
+    }
+
+    #[test]
+    fn detects_completion_when_one_alive() {
+        use crate::types::AiState;
+        
+        let mut handler = SimulationHandler::new(3);
+        
+        // Initially not complete
+        assert!(!handler.is_complete());
+        assert_eq!(handler.count_alive(), 3);
+        
+        // Kill two entities manually for testing
+        if let Some(entity) = handler.logic_mut().data_mut().entity_mut(0) {
+            entity.state = AiState::Dead;
+            entity.health = 0.0;
+        }
+        if let Some(entity) = handler.logic_mut().data_mut().entity_mut(1) {
+            entity.state = AiState::Dead;
+            entity.health = 0.0;
+        }
+        
+        // Should be complete with only one alive
+        assert!(handler.is_complete());
+        assert_eq!(handler.count_alive(), 1);
+    }
+
+    #[test]
+    fn simulation_stops_when_complete() {
+        use crate::types::AiState;
+        
+        let mut handler = SimulationHandler::new(2);
+        handler.start();
+        assert!(handler.is_running());
+        
+        // Kill one entity
+        if let Some(entity) = handler.logic_mut().data_mut().entity_mut(0) {
+            entity.state = AiState::Dead;
+            entity.health = 0.0;
+        }
+        
+        // Step should detect completion and stop
+        handler.step();
+        assert!(!handler.is_running(), "Simulation should stop when complete");
+        assert!(handler.is_complete());
+    }
+
+    #[test]
+    #[ignore] // This is a long-running test, run with --ignored flag
+    fn small_grid_completes_within_time_limit() {
+        // Test for a 50x50 grid simulation (2500 square units)
+        // Should complete within 10 minutes per 50 unit square grid
+        // For a 50x50 grid, that's 10 minutes total
+        // 
+        // Note: This test uses fewer entities (5) to speed up testing while
+        // still validating the completion logic works correctly
+        use std::time::{Duration, Instant};
+        
+        let entity_count = 5; // Small number of entities for faster completion
+        let mut handler = SimulationHandler::new(entity_count);
+        handler.start();
+        
+        let start = Instant::now();
+        let timeout = Duration::from_secs(600); // 10 minutes
+        let max_ticks = 1_000_000; // Safety limit to prevent infinite loops
+        
+        let mut tick_count = 0;
+        while handler.is_running() && tick_count < max_ticks {
+            handler.step();
+            tick_count += 1;
+            
+            // Check timeout
+            if start.elapsed() > timeout {
+                panic!(
+                    "Simulation did not complete within 10 minutes. Ticks: {}, Alive: {}",
+                    tick_count,
+                    handler.count_alive()
+                );
+            }
+            
+            // Log progress periodically
+            if tick_count % 10000 == 0 {
+                println!(
+                    "Tick {}: {} alive, elapsed: {:?}",
+                    tick_count,
+                    handler.count_alive(),
+                    start.elapsed()
+                );
+            }
+        }
+        
+        // Verify simulation completed (stopped because only one AI left)
+        assert!(
+            handler.is_complete(),
+            "Simulation should be complete. Alive: {}",
+            handler.count_alive()
+        );
+        assert!(
+            handler.count_alive() <= 1,
+            "Should have at most one AI alive, got: {}",
+            handler.count_alive()
+        );
+        
+        let elapsed = start.elapsed();
+        println!(
+            "✓ Simulation completed in {:?} with {} ticks",
+            elapsed, tick_count
+        );
+        assert!(
+            elapsed < timeout,
+            "Simulation took too long: {:?}",
+            elapsed
+        );
     }
 }

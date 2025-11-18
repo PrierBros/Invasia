@@ -102,6 +102,10 @@ impl SimulationData {
         self.entities.get(index)
     }
 
+    pub fn entities(&self) -> &[AiEntity] {
+        &self.entities
+    }
+
     pub fn resource_transfers_mut(&mut self) -> &mut Vec<(usize, f32, f32)> {
         &mut self.resource_transfers
     }
