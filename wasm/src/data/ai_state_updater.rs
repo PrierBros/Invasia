@@ -117,9 +117,7 @@ impl AiStateUpdater {
                 } else if entity.military_strength < ATTACK_COST * 0.5 {
                     // Very low on resources, stay idle to accumulate
                     entity.state = AiState::Idle;
-                }
-                // Otherwise keep defending if there are nearby threats
-                if nearby_attackers == 0 && nearest_enemy_dist_sq > 15000.0 {
+                } else if nearby_attackers == 0 && nearest_enemy_dist_sq > 15000.0 {
                     entity.state = AiState::Idle;
                 }
             }
