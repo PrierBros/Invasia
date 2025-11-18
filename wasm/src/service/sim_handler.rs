@@ -194,14 +194,14 @@ mod tests {
         assert!(!handler.is_complete());
         assert_eq!(handler.count_alive(), 3);
         
-        // Kill two entities manually for testing
+        // Kill two entities manually for testing by removing their territory
         if let Some(entity) = handler.logic_mut().data_mut().entity_mut(0) {
             entity.state = AiState::Dead;
-            entity.health = 0.0;
+            entity.territory = 0;
         }
         if let Some(entity) = handler.logic_mut().data_mut().entity_mut(1) {
             entity.state = AiState::Dead;
-            entity.health = 0.0;
+            entity.territory = 0;
         }
         
         // Should be complete with only one alive
@@ -217,10 +217,10 @@ mod tests {
         handler.start();
         assert!(handler.is_running());
         
-        // Kill one entity
+        // Kill one entity by removing its territory
         if let Some(entity) = handler.logic_mut().data_mut().entity_mut(0) {
             entity.state = AiState::Dead;
-            entity.health = 0.0;
+            entity.territory = 0;
         }
         
         // Step should detect completion and stop

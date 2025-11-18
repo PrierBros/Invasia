@@ -197,14 +197,13 @@ impl SimulationData {
         for (i, entity) in self.entities.iter().enumerate() {
             let base = i * SNAPSHOT_FIELD_COUNT;
             self.flat_snapshot[base] = entity.id as f32;
-            self.flat_snapshot[base + 1] = entity.health;
-            self.flat_snapshot[base + 2] = entity.military_strength;
-            self.flat_snapshot[base + 3] = entity.money;
-            self.flat_snapshot[base + 4] = entity.territory;
+            self.flat_snapshot[base + 1] = entity.military_strength;
+            self.flat_snapshot[base + 2] = entity.money;
+            self.flat_snapshot[base + 3] = entity.territory as f32;
             let state_value: u32 = entity.state.into();
-            self.flat_snapshot[base + 5] = state_value as f32;
-            self.flat_snapshot[base + 6] = entity.position_x;
-            self.flat_snapshot[base + 7] = entity.position_y;
+            self.flat_snapshot[base + 4] = state_value as f32;
+            self.flat_snapshot[base + 5] = entity.position_x;
+            self.flat_snapshot[base + 6] = entity.position_y;
         }
         self.flat_snapshot_dirty = false;
     }

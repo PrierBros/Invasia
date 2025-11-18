@@ -90,7 +90,8 @@ impl SpatialGrid {
     fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
         self.clear();
         for (index, entity) in snapshots.iter().enumerate() {
-            if entity.state != AiState::Active {
+            // Only track Attacking and Defending entities in the spatial grid
+            if entity.state != AiState::Attacking && entity.state != AiState::Defending {
                 continue;
             }
 
@@ -105,7 +106,7 @@ impl SpatialGrid {
                     #[cfg(debug_assertions)]
                     {
                         eprintln!(
-                            "Warning: Spatial grid cell at ({}, {}) is full (max {} Active entities). Active entity {} at ({:.2}, {:.2}) dropped. Total overflow: {}",
+                            "Warning: Spatial grid cell at ({}, {}) is full (max {} Attacking/Defending entities). Entity {} at ({:.2}, {:.2}) dropped. Total overflow: {}",
                             coords.0,
                             coords.1,
                             MAX_ENTITIES_PER_CELL,
@@ -123,7 +124,7 @@ impl SpatialGrid {
         {
             if self.overflow_count > 0 {
                 eprintln!(
-                    "Spatial grid rebuild complete. {} Active entities couldn't be added due to cell capacity limits.",
+                    "Spatial grid rebuild complete. {} Attacking/Defending entities couldn't be added due to cell capacity limits.",
                     self.overflow_count
                 );
             }

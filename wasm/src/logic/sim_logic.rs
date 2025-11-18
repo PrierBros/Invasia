@@ -27,6 +27,12 @@ impl SimulationLogic {
         let (_, duration) = self.benchmark_builder.measure_tick(|| {
             self.data.increment_tick();
             let current_tick = self.data.tick();
+            
+            // Update time in state updater (convert tick to milliseconds)
+            // This is a simple approximation - in production you'd use actual wall clock time
+            let current_time_ms = (current_tick as f64) * (1000.0 / self.data.tick_rate() as f64);
+            self.state_updater.update_time(current_time_ms);
+            
             self.neighbor_builder.rebuild_snapshots(&mut self.data);
             let snapshots = self.data.snapshots().to_vec();
             self.grid_builder.rebuild(&snapshots);
@@ -48,23 +54,29 @@ impl SimulationLogic {
 
             self.data.reset_tick_buffers();
 
+            // Check for AIs that lost all territory (death condition)
             for i in 0..entity_count {
-                let (state, health, pos_x, pos_y, military_strength, money) = {
+                let (state, territory, military_strength, money) = {
                     let entity = self.data.entity(i).expect("entity must exist");
                     (
                         entity.state,
-                        entity.health,
-                        entity.position_x,
-                        entity.position_y,
+                        entity.territory,
                         entity.military_strength,
                         entity.money,
                     )
                 };
 
-                if health <= 0.0 && state != AiState::Dead {
+                // AI dies when it loses all its territory
+                if territory == 0 && state != AiState::Dead {
                     self.data.dead_indices_mut().push(i);
 
+                    // Transfer remaining resources to nearest attacker
                     if military_strength > 0.0 || money > 0.0 {
+                        let (pos_x, pos_y) = {
+                            let entity = self.data.entity(i).expect("entity must exist");
+                            (entity.position_x, entity.position_y)
+                        };
+                        
                         let mut nearest_attacker_idx: Option<usize> = None;
                         let mut nearest_dist_sq = f32::INFINITY;
 
@@ -74,7 +86,7 @@ impl SimulationLogic {
                             }
 
                             if let Some(other) = self.data.entity(idx) {
-                                if matches!(other.state, AiState::Active) {
+                                if matches!(other.state, AiState::Attacking) {
                                     let dx = pos_x - other.position_x;
                                     let dy = pos_y - other.position_y;
                                     let dist_sq = dx * dx + dy * dy;
@@ -112,10 +124,9 @@ impl SimulationLogic {
             for &dead_idx in &dead_indices {
                 if let Some(dead_entity) = self.data.entity_mut(dead_idx) {
                     dead_entity.state = AiState::Dead;
-                    dead_entity.health = 0.0;
                     dead_entity.military_strength = 0.0;
                     dead_entity.money = 0.0;
-                    dead_entity.territory = 0.0;
+                    dead_entity.territory = 0;
                 }
             }
             dead_indices.clear();

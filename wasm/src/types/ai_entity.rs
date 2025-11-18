@@ -4,10 +4,9 @@ use serde::{Deserialize, Serialize};
 #[serde(into = "u32", from = "u32")]
 pub enum AiState {
     Idle = 0,
-    Active = 1,
-    Resting = 2,
-    Moving = 3,
-    Dead = 4,
+    Attacking = 1,
+    Defending = 2,
+    Dead = 3,
 }
 
 impl From<AiState> for u32 {
@@ -19,10 +18,9 @@ impl From<AiState> for u32 {
 impl From<u32> for AiState {
     fn from(value: u32) -> AiState {
         match value {
-            1 => AiState::Active,
-            2 => AiState::Resting,
-            3 => AiState::Moving,
-            4 => AiState::Dead,
+            1 => AiState::Attacking,
+            2 => AiState::Defending,
+            3 => AiState::Dead,
             _ => AiState::Idle,
         }
     }
@@ -31,40 +29,23 @@ impl From<u32> for AiState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiEntity {
     pub id: u32,
-    pub health: f32,
     pub military_strength: f32,
     pub position_x: f32,
     pub position_y: f32,
     pub state: AiState,
-    pub territory: f32,
+    pub territory: u32, // Number of grid spaces owned
     pub money: f32,
     #[serde(skip)]
     rng_state: u32,
+    #[serde(skip)]
+    pub last_update_time: f64, // For time-based resource accumulation
 }
 
 impl AiEntity {
     pub fn new(id: u32) -> Self {
         let id_seed = id as f32;
-        let variation = ((id_seed * 0.7321).sin() + 1.0) / 2.0;
-        let initial_military_strength = 50.0 + (variation * 50.0);
-
-        let health_variation = ((id_seed * 1.234).cos() + 1.0) / 2.0;
-        let initial_health = 70.0 + (health_variation * 30.0);
-
-        let money_variation = ((id_seed * 3.141).sin() + 1.0) / 2.0;
-        let initial_money = 100.0 + (money_variation * 100.0);
-
-        let state_seed = ((id_seed * 2.718).sin() + 1.0) / 2.0;
-        let initial_state = if state_seed < 0.25 {
-            AiState::Idle
-        } else if state_seed < 0.5 {
-            AiState::Active
-        } else if state_seed < 0.75 {
-            AiState::Resting
-        } else {
-            AiState::Moving
-        };
-
+        
+        // Deterministic position generation based on ID
         let x_seed = ((id_seed * 0.3371).sin() + (id_seed * 0.0157).sin()) * 0.5;
         let y_seed = ((id_seed * 0.4219).cos() + (id_seed * 0.0213).cos()) * 0.5;
 
@@ -73,14 +54,14 @@ impl AiEntity {
 
         Self {
             id,
-            health: initial_health,
-            military_strength: initial_military_strength,
+            military_strength: 10.0, // All AIs start with 10 military strength
             position_x: spawn_x,
             position_y: spawn_y,
-            state: initial_state,
-            territory: 10.0,
-            money: initial_money,
+            state: AiState::Idle,
+            territory: 1, // All AIs start with 1 grid space
+            money: 0.0,   // All AIs start with 0 money
             rng_state: Self::seed_rng(id),
+            last_update_time: 0.0,
         }
     }
 
