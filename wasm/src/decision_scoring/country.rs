@@ -67,6 +67,17 @@ impl AdaptiveWeights {
         let rho_new = rho_base * loss_factor;
         self.rho = (rho_new.round() as i32).clamp(2, 16);
     }
+    
+    /// Apply defensive boost when under attack
+    /// This significantly increases security weight to prioritize defensive actions
+    pub fn apply_defensive_boost(&mut self) {
+        // Boost beta (security weight) to maximum to prioritize defense
+        self.beta = 16;
+        // Also reduce resource seeking to focus on survival
+        self.alpha = (self.alpha / 2).max(2);
+        // Reduce growth focus during immediate threat
+        self.gamma = (self.gamma / 2).max(2);
+    }
 }
 
 impl Default for AdaptiveWeights {
