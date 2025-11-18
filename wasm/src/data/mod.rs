@@ -9,8 +9,8 @@ pub use benchmark_metric_builder::BenchmarkMetricBuilder;
 pub use grid_update_builder::GridUpdateBuilder;
 
 use crate::types::{
-    AiEntity, BenchmarkMetrics, EntitySnapshot, PublicEntitySnapshot, SimulationSnapshot,
-    SNAPSHOT_FIELD_COUNT,
+    AiEntity, BenchmarkMetrics, EntitySnapshot, GridSpace, PublicEntitySnapshot,
+    SimulationSnapshot, SNAPSHOT_FIELD_COUNT,
 };
 
 pub struct SimulationData {
@@ -18,7 +18,9 @@ pub struct SimulationData {
     running: bool,
     tick_rate: u32,
     entity_count: usize,
+    grid_size: usize,  // Width/height of the grid
     entities: Vec<AiEntity>,
+    grid_spaces: Vec<GridSpace>, // Flattened 2D grid
     snapshot_buffer: Vec<EntitySnapshot>,
     flat_snapshot: Vec<f32>,
     snapshot_dirty: bool,
@@ -30,12 +32,19 @@ pub struct SimulationData {
 
 impl SimulationData {
     pub fn new(entity_count: usize) -> Self {
+        Self::with_grid_size(entity_count, 50) // Default grid size 50x50
+    }
+
+    pub fn with_grid_size(entity_count: usize, grid_size: usize) -> Self {
+        let total_grid_spaces = grid_size * grid_size;
         let mut data = Self {
             tick: 0,
             running: false,
             tick_rate: 60,
             entity_count,
+            grid_size,
             entities: Vec::with_capacity(entity_count),
+            grid_spaces: vec![GridSpace::new(); total_grid_spaces],
             snapshot_buffer: Vec::with_capacity(entity_count),
             flat_snapshot: Vec::with_capacity(entity_count * SNAPSHOT_FIELD_COUNT),
             snapshot_dirty: true,
@@ -83,9 +92,40 @@ impl SimulationData {
 
     pub fn rebuild_entities(&mut self, entity_count: usize) {
         self.entities.clear();
-        for i in 0..entity_count {
-            self.entities.push(AiEntity::new(i as u32));
+        
+        // Reset grid spaces
+        for space in &mut self.grid_spaces {
+            *space = GridSpace::new();
         }
+        
+        // Assign each AI a random starting grid space
+        for i in 0..entity_count {
+            let mut entity = AiEntity::new(i as u32);
+            
+            // Find an unoccupied grid space for this AI
+            // Use deterministic placement based on entity ID
+            let grid_area = self.grid_size * self.grid_size;
+            let spacing = (grid_area as f32 / entity_count as f32).sqrt().floor() as usize;
+            let spacing = spacing.max(1);
+            
+            let row = (i / (self.grid_size / spacing.max(1))) * spacing;
+            let col = (i % (self.grid_size / spacing.max(1))) * spacing;
+            let grid_index = (row.min(self.grid_size - 1)) * self.grid_size + col.min(self.grid_size - 1);
+            
+            // Assign this grid space to the AI
+            if grid_index < self.grid_spaces.len() {
+                self.grid_spaces[grid_index] = GridSpace::with_owner(entity.id, 5.0);
+                
+                // Update entity position to be centered in their grid space
+                let grid_x = (col as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
+                let grid_y = (row as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
+                entity.position_x = grid_x;
+                entity.position_y = grid_y;
+            }
+            
+            self.entities.push(entity);
+        }
+        
         self.entity_count = entity_count;
         self.snapshot_buffer = Vec::with_capacity(entity_count);
         self.flat_snapshot = Vec::with_capacity(entity_count * SNAPSHOT_FIELD_COUNT);
@@ -186,6 +226,55 @@ impl SimulationData {
 
     pub fn set_entity_count(&mut self, entity_count: usize) {
         self.rebuild_entities(entity_count);
+    }
+
+    pub fn grid_size(&self) -> usize {
+        self.grid_size
+    }
+
+    pub fn set_grid_size(&mut self, grid_size: usize) {
+        self.grid_size = grid_size;
+        let total_grid_spaces = grid_size * grid_size;
+        self.grid_spaces.resize(total_grid_spaces, GridSpace::new());
+        self.rebuild_entities(self.entity_count);
+    }
+
+    pub fn grid_spaces(&self) -> &[GridSpace] {
+        &self.grid_spaces
+    }
+
+    pub fn grid_space_mut(&mut self, index: usize) -> Option<&mut GridSpace> {
+        self.grid_spaces.get_mut(index)
+    }
+
+    pub fn position_to_grid_index(&self, x: f32, y: f32) -> Option<usize> {
+        // Convert world coordinates (-1200 to 1200) to grid coordinates
+        let grid_x = ((x + 1200.0) / 2400.0 * self.grid_size as f32).floor() as i32;
+        let grid_y = ((y + 1200.0) / 2400.0 * self.grid_size as f32).floor() as i32;
+        
+        if grid_x < 0 || grid_x >= self.grid_size as i32 || grid_y < 0 || grid_y >= self.grid_size as i32 {
+            return None;
+        }
+        
+        Some((grid_y as usize) * self.grid_size + (grid_x as usize))
+    }
+
+    /// Update all entities' territory counts based on owned grid spaces
+    pub fn update_territories(&mut self) {
+        // Reset all territory counts
+        for entity in &mut self.entities {
+            entity.territory = 0;
+        }
+        
+        // Count owned grid spaces for each entity
+        for space in &self.grid_spaces {
+            if let Some(owner_id) = space.owner_id {
+                // Find the entity with this ID
+                if let Some(entity) = self.entities.iter_mut().find(|e| e.id == owner_id) {
+                    entity.territory += 1;
+                }
+            }
+        }
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

@@ -25,6 +25,14 @@ impl SimulationHandler {
     }
 
     #[wasm_bindgen]
+    pub fn init_with_grid(entity_count: usize, tick_rate: u32, grid_size: usize) -> Self {
+        let mut handler = Self::new(entity_count);
+        handler.logic.set_tick_rate(tick_rate);
+        handler.logic.set_grid_size(grid_size);
+        handler
+    }
+
+    #[wasm_bindgen]
     pub fn start(&mut self) {
         self.logic.start();
     }
@@ -82,6 +90,16 @@ impl SimulationHandler {
     #[wasm_bindgen]
     pub fn set_entity_count(&mut self, entity_count: usize) {
         self.logic.set_entity_count(entity_count);
+    }
+
+    #[wasm_bindgen]
+    pub fn get_grid_size(&self) -> usize {
+        self.logic.grid_size()
+    }
+
+    #[wasm_bindgen]
+    pub fn set_grid_size(&mut self, grid_size: usize) {
+        self.logic.set_grid_size(grid_size);
     }
 
     #[wasm_bindgen]
@@ -227,6 +245,85 @@ mod tests {
         handler.step();
         assert!(!handler.is_running(), "Simulation should stop when complete");
         assert!(handler.is_complete());
+    }
+
+    #[test]
+    fn grid_size_configuration() {
+        let handler = SimulationHandler::new(10);
+        assert_eq!(handler.get_grid_size(), 50); // Default grid size
+        
+        let mut handler = SimulationHandler::init_with_grid(5, 60, 20);
+        assert_eq!(handler.get_grid_size(), 20);
+        assert_eq!(handler.get_entity_count(), 5);
+        
+        handler.set_grid_size(30);
+        assert_eq!(handler.get_grid_size(), 30);
+    }
+
+    #[test]
+    fn entities_start_with_correct_values() {
+        let mut handler = SimulationHandler::new(5);
+        
+        // Access entities through the logic
+        for i in 0..5 {
+            let entity = handler.logic_mut().data_mut().entity(i).expect("Entity should exist");
+            assert_eq!(entity.territory, 1, "Entity {} should start with 1 territory", i);
+            assert_eq!(entity.money, 0.0, "Entity {} should start with 0 money", i);
+            assert_eq!(entity.military_strength, 10.0, "Entity {} should start with 10 military strength", i);
+        }
+    }
+
+    #[test]
+    fn time_based_resource_accumulation() {
+        let mut handler = SimulationHandler::new(2);
+        
+        // Get initial values
+        let initial_money = handler.logic_mut().data_mut().entity(0).unwrap().money;
+        let initial_military = handler.logic_mut().data_mut().entity(0).unwrap().military_strength;
+        
+        // Run several steps
+        for _ in 0..10 {
+            handler.step();
+        }
+        
+        // Resources should have increased
+        let final_money = handler.logic_mut().data_mut().entity(0).unwrap().money;
+        let final_military = handler.logic_mut().data_mut().entity(0).unwrap().military_strength;
+        
+        assert!(final_money > initial_money, "Money should increase over time");
+        assert!(final_military > initial_military, "Military strength should increase over time");
+    }
+
+    #[test]
+    fn entity_dies_when_territory_zero() {
+        use crate::types::AiState;
+        
+        let mut handler = SimulationHandler::new(3);
+        
+        // Manually set territory to 0 and clear grid space ownership
+        let entity_id = {
+            let entity = handler.logic_mut().data_mut().entity_mut(0).unwrap();
+            entity.territory = 0;
+            entity.id
+        };
+        
+        // Also need to clear grid space ownership for this entity
+        let grid_size = handler.logic_mut().data_mut().grid_size();
+        for i in 0..(grid_size * grid_size) {
+            if let Some(space) = handler.logic_mut().data_mut().grid_space_mut(i) {
+                if space.owner_id == Some(entity_id) {
+                    space.owner_id = None;
+                }
+            }
+        }
+        
+        // Step the simulation
+        handler.step();
+        
+        // Entity should be marked as dead
+        let entity = handler.logic_mut().data_mut().entity(0).unwrap();
+        assert_eq!(entity.state, AiState::Dead);
+        assert_eq!(entity.territory, 0);
     }
 
     #[test]

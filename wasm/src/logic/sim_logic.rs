@@ -132,6 +132,9 @@ impl SimulationLogic {
             dead_indices.clear();
             *self.data.dead_indices_mut() = dead_indices;
 
+            // Update territory counts based on owned grid spaces
+            self.data.update_territories();
+
             self.data.mark_snapshots_dirty();
         });
 
@@ -203,6 +206,14 @@ impl SimulationLogic {
 
     pub fn set_entity_count(&mut self, entity_count: usize) {
         self.data.set_entity_count(entity_count);
+    }
+
+    pub fn grid_size(&self) -> usize {
+        self.data.grid_size()
+    }
+
+    pub fn set_grid_size(&mut self, grid_size: usize) {
+        self.data.set_grid_size(grid_size);
     }
 
     pub fn request_snapshot(&mut self) -> Option<SimulationSnapshot> {

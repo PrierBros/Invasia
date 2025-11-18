@@ -55,6 +55,7 @@
   let entityCount: number = 250;
   let tickRate: number = 30;
   let renderRate: number = 30; // Manual control of render FPS
+  let gridSize: number = 50; // Grid width/height
   
   // Performance metrics
   let actualTickRate: number = 0;
@@ -258,6 +259,18 @@
     if (!simulation || !wasmLoaded) return;
     
     pauseSimulation();
+    
+    // Calculate max entities based on grid size (at least 1 space per AI, default 20 per AI)
+    const totalGridSpaces = gridSize * gridSize;
+    const maxEntities = totalGridSpaces;
+    const defaultMaxEntities = Math.floor(totalGridSpaces / 20);
+    
+    // Clamp entity count to valid range
+    if (entityCount > maxEntities) {
+      entityCount = defaultMaxEntities;
+    }
+    
+    simulation.set_grid_size(gridSize);
     simulation.set_entity_count(entityCount);
     simulation.set_tick_rate(tickRate);
     updateSnapshot();
@@ -450,7 +463,18 @@
       <h3>Configuration</h3>
       <div class="config-inputs">
         <label>
-          Entity Count: <span>{entityCount}</span>
+          Grid Size: <span>{gridSize}x{gridSize} ({gridSize * gridSize} spaces)</span>
+          <input 
+            type="range" 
+            min="10" 
+            max="500" 
+            step="10"
+            bind:value={gridSize}
+          />
+        </label>
+        
+        <label>
+          Entity Count: <span>{entityCount} (max: {gridSize * gridSize})</span>
           <input 
             type="range" 
             min="10" 
