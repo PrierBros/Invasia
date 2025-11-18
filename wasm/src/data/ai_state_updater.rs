@@ -1,11 +1,7 @@
+use crate::constants::{ATTACK_COST, MILITARY_STRENGTH_PER_SPACE_PER_SEC, MONEY_PER_SPACE_PER_SEC};
 use crate::types::{AiEntity, AiState, EntitySnapshot};
 
 use super::grid_update_builder::GridUpdateBuilder;
-
-// Resource generation rates per grid space per second
-const MILITARY_STRENGTH_PER_SPACE_PER_SEC: f32 = 0.5;
-const MONEY_PER_SPACE_PER_SEC: f32 = 1.0;
-const ATTACK_COST_MILITARY: f32 = 10.0; // Cost to attempt conquering a grid space
 
 pub struct AiStateUpdater {
     current_time: f64,
@@ -92,20 +88,20 @@ impl AiStateUpdater {
                 if let Some(_enemy_idx) = nearest_enemy_idx {
                     if nearest_enemy_dist_sq < 10000.0 {
                         // Enemy nearby, decide to defend or attack
-                        if entity.military_strength >= ATTACK_COST_MILITARY * 2.0 {
+                        if entity.military_strength >= ATTACK_COST * 2.0 {
                             entity.state = AiState::Attacking;
                         } else {
                             entity.state = AiState::Defending;
                         }
                     }
-                } else if entity.military_strength >= ATTACK_COST_MILITARY * 3.0 {
+                } else if entity.military_strength >= ATTACK_COST * 3.0 {
                     // Strong enough to attack
                     entity.state = AiState::Attacking;
                 }
             }
             AiState::Attacking => {
                 // Attacking consumes military strength
-                if entity.military_strength < ATTACK_COST_MILITARY {
+                if entity.military_strength < ATTACK_COST {
                     entity.state = AiState::Idle; // Not enough strength to continue attacking
                 }
             }

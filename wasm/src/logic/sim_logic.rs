@@ -1,8 +1,10 @@
+use crate::constants::{ATTACK_COST, DEFENSE_ACCUMULATION, DEFENSE_BONUS_MULTIPLIER, MAX_DEFENSE_STRENGTH};
 use crate::data::{
     AiNeighborBuilder, AiStateUpdater, BenchmarkMetricBuilder, GridUpdateBuilder, SimulationData,
 };
 use crate::types::{AiState, SimulationSnapshot};
 use std::mem;
+use std::time::Instant;
 
 pub struct SimulationLogic {
     data: SimulationData,
@@ -10,6 +12,7 @@ pub struct SimulationLogic {
     state_updater: AiStateUpdater,
     grid_builder: GridUpdateBuilder,
     benchmark_builder: BenchmarkMetricBuilder,
+    start_time: Instant,
 }
 
 impl SimulationLogic {
@@ -20,6 +23,7 @@ impl SimulationLogic {
             state_updater: AiStateUpdater::new(),
             grid_builder: GridUpdateBuilder::new(5.0, 10.0),
             benchmark_builder: BenchmarkMetricBuilder::new(),
+            start_time: Instant::now(),
         }
     }
 
@@ -27,9 +31,9 @@ impl SimulationLogic {
         self.data.increment_tick();
         let current_tick = self.data.tick();
         
-        // Update time in state updater (convert tick to milliseconds)
-        // This is a simple approximation - in production you'd use actual wall clock time
-        let current_time_ms = (current_tick as f64) * (1000.0 / self.data.tick_rate() as f64);
+        // Use actual wall clock time for time-based resource generation
+        let elapsed = self.start_time.elapsed();
+        let current_time_ms = elapsed.as_millis() as f64;
         self.state_updater.update_time(current_time_ms);
         
         let (_, duration) = self.benchmark_builder.measure_tick(|| {
@@ -222,10 +226,6 @@ impl SimulationLogic {
 
     /// Process conquest attempts by attacking AIs
     fn process_conquests(&mut self) {
-        const ATTACK_COST: f32 = 10.0;
-        const DEFENSE_BONUS: f32 = 1.5;
-        const DEFENSE_ACCUMULATION: f32 = 1.0; // Defense strength added per defending AI per tick
-        
         let grid_size = self.data.grid_size();
         let entity_count = self.data.entity_len();
         
@@ -247,7 +247,7 @@ impl SimulationLogic {
                 if space.owner_id == Some(entity_id) {
                     space.defense_strength += DEFENSE_ACCUMULATION;
                     // Cap defense strength
-                    space.defense_strength = space.defense_strength.min(50.0);
+                    space.defense_strength = space.defense_strength.min(MAX_DEFENSE_STRENGTH);
                 }
             }
         }
@@ -292,7 +292,7 @@ impl SimulationLogic {
                     let (can_attack, total_defense) = if let Some(target_space) = self.data.grid_spaces().get(target_grid_idx) {
                         if let Some(defender_id) = target_space.owner_id {
                             if defender_id != attacker_id {
-                                let defense = ATTACK_COST + target_space.defense_strength * DEFENSE_BONUS;
+                                let defense = ATTACK_COST + target_space.defense_strength * DEFENSE_BONUS_MULTIPLIER;
                                 (military_strength >= defense, defense)
                             } else {
                                 (false, 0.0) // Own space

@@ -118,7 +118,7 @@ impl SimulationData {
             let mut found = false;
             for offset in 0..self.grid_spaces.len() {
                 let idx = (grid_index + offset) % self.grid_spaces.len();
-                if self.grid_spaces[idx].owner.is_none() {
+                if self.grid_spaces[idx].owner_id.is_none() {
                     assigned_index = idx;
                     found = true;
                     break;
