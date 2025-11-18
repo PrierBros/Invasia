@@ -1,9 +1,32 @@
-use crate::data::{AiState, EntitySnapshot};
+use crate::types::{AiState, EntitySnapshot};
 
 const GRID_SIZE: usize = 500;
 const MAX_ENTITIES_PER_CELL: usize = 4;
 
-pub struct SpatialGrid {
+pub struct GridUpdateBuilder {
+    grid: SpatialGrid,
+}
+
+impl GridUpdateBuilder {
+    pub fn new(cell_size: f32, search_radius: f32) -> Self {
+        Self {
+            grid: SpatialGrid::new(cell_size, search_radius),
+        }
+    }
+
+    pub fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
+        self.grid.rebuild(snapshots);
+    }
+
+    pub fn for_each_neighbor<F>(&self, x: f32, y: f32, f: F)
+    where
+        F: FnMut(usize),
+    {
+        self.grid.for_each_neighbor(x, y, f);
+    }
+}
+
+struct SpatialGrid {
     cell_size: f32,
     _search_radius: f32,
     cells: Vec<([usize; MAX_ENTITIES_PER_CELL], usize)>,
@@ -14,7 +37,7 @@ pub struct SpatialGrid {
 }
 
 impl SpatialGrid {
-    pub fn new(cell_size: f32, search_radius: f32) -> Self {
+    fn new(cell_size: f32, search_radius: f32) -> Self {
         let capacity = GRID_SIZE * GRID_SIZE;
         let mut cells = Vec::with_capacity(capacity);
         cells.resize(capacity, ([0; MAX_ENTITIES_PER_CELL], 0));
@@ -38,7 +61,7 @@ impl SpatialGrid {
         }
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         for cell in &mut self.cells {
             cell.1 = 0;
         }
@@ -64,7 +87,7 @@ impl SpatialGrid {
         Some(y * GRID_SIZE + x)
     }
 
-    pub fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
+    fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
         self.clear();
         for (index, entity) in snapshots.iter().enumerate() {
             if entity.state != AiState::Active {
@@ -107,7 +130,7 @@ impl SpatialGrid {
         }
     }
 
-    pub fn for_each_neighbor<F>(&self, x: f32, y: f32, mut f: F)
+    fn for_each_neighbor<F>(&self, x: f32, y: f32, mut f: F)
     where
         F: FnMut(usize),
     {

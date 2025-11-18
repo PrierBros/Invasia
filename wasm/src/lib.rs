@@ -1,9 +1,9 @@
 mod data;
 mod decision_scoring;
-mod dependency;
 mod logic;
 mod service;
+mod types;
 
-pub use data::{AiEntity, AiState};
 pub use decision_scoring::*;
-pub use service::SimulationService as Simulation;
+pub use service::SimulationHandler as Simulation;
+pub use types::{AiEntity, AiState};
