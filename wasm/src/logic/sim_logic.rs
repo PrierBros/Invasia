@@ -196,14 +196,13 @@ impl SimulationLogic {
             return Some(self.data.flat_snapshot_slice());
         }
 
-        let (slice, duration) = self.benchmark_builder.measure_snapshot(|| {
+        let (_, duration) = self.benchmark_builder.measure_snapshot(|| {
             self.data.ensure_flat_snapshot_ready();
-            self.data.flat_snapshot_slice()
         });
         if duration > 0.0 {
             self.data.metrics_mut().update_snapshot(duration);
         }
-        Some(slice)
+        Some(self.data.flat_snapshot_slice())
     }
 
     pub fn last_tick_duration(&self) -> f64 {
