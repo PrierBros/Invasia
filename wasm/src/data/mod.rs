@@ -98,7 +98,7 @@ impl SimulationData {
             *space = GridSpace::new();
         }
         
-        // Assign each AI a random starting grid space
+        // Assign each AI a deterministic starting grid space based on even distribution
         for i in 0..entity_count {
             let mut entity = AiEntity::new(i as u32);
             
