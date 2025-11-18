@@ -260,14 +260,13 @@
     
     pauseSimulation();
     
-    // Calculate max entities based on grid size (at least 1 space per AI, default 20 per AI)
+    // Calculate max entities based on grid size (1 entity per grid space maximum)
     const totalGridSpaces = gridSize * gridSize;
     const maxEntities = totalGridSpaces;
-    const defaultMaxEntities = Math.floor(totalGridSpaces / 20);
     
     // Clamp entity count to valid range
     if (entityCount > maxEntities) {
-      entityCount = defaultMaxEntities;
+      entityCount = maxEntities;
     }
     
     simulation.set_grid_size(gridSize);
@@ -478,7 +477,7 @@
           <input 
             type="range" 
             min="10" 
-            max="100000" 
+            max={gridSize * gridSize} 
             step="10"
             bind:value={entityCount}
           />
