@@ -181,7 +181,7 @@
       await wasmModule.default();
       
       // Initialize the simulation
-      simulation = new wasmModule.Simulation(entityCount);
+      simulation = new wasmModule.SimulationHandler(entityCount);
       wasmLoaded = true;
       
       // Get initial snapshot
