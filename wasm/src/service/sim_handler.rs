@@ -472,8 +472,8 @@ mod tests {
     #[ignore] // This is a long-running test, run with --ignored flag
     fn large_grid_100_ais_completes() {
         // Integration test: 10x10 grid with 100 AIs
-        // Should complete with < 5 AIs alive OR reach full completion (1 AI)
-        // This validates that AIs are aggressive and actively trying to gain territory
+        // Validates that AIs are aggressive and actively trying to gain territory
+        // Success criteria: Reduce from 100 to ≤10 AIs (90% reduction) OR full completion
         use std::time::{Duration, Instant};
         
         let entity_count = 100;
@@ -486,8 +486,8 @@ mod tests {
         let max_ticks = 10_000_000; // Safety limit
         
         let mut tick_count = 0;
-        let mut reached_target = false;
-        let target_alive = 5; // Target: reduce to less than 5 AIs
+        let target_for_early_exit = 10; // Exit early if we reach this
+        let minimum_progress = entity_count / 10; // At least 90% reduction
         
         while handler.is_running() && tick_count < max_ticks {
             handler.step();
@@ -495,48 +495,23 @@ mod tests {
             
             let alive = handler.count_alive();
             
-            // Check if we reached target (< 5 means simulation should be complete or nearly complete)
-            if alive < target_alive && !reached_target {
-                reached_target = true;
+            // If we reach our target or complete, we're done
+            if alive <= target_for_early_exit || handler.is_complete() {
                 let elapsed = start.elapsed();
                 println!(
-                    "✓ Reached < {} AIs alive at tick {} (elapsed: {:?})",
-                    target_alive, tick_count, elapsed
-                );
-            }
-            
-            // If complete (1 AI), we're done
-            if handler.is_complete() {
-                let elapsed = start.elapsed();
-                println!(
-                    "✓ Simulation fully completed at tick {} (elapsed: {:?})",
-                    tick_count, elapsed
+                    "✓ Reached {} AIs alive at tick {} (elapsed: {:?})",
+                    alive, tick_count, elapsed
                 );
                 break;
             }
             
             // Check timeout
             if start.elapsed() > timeout {
-                if reached_target || handler.is_complete() {
-                    println!(
-                        "✓ Reached target or completed (currently {} AIs alive)",
-                        alive
-                    );
-                    break;
-                } else {
-                    // Don't fail if we made significant progress (reached 10 or fewer from 100)
-                    if alive <= 10 {
-                        println!(
-                            "⚠ Did not reach < {} AIs, but made significant progress: {} -> {} AIs",
-                            target_alive, entity_count, alive
-                        );
-                        break;
-                    }
-                    panic!(
-                        "Simulation did not make sufficient progress. Ticks: {}, Alive: {} (started with {})",
-                        tick_count, alive, entity_count
-                    );
-                }
+                println!(
+                    "⚠ Timeout reached at {} AIs alive (started with {})",
+                    alive, entity_count
+                );
+                break;
             }
             
             // Log progress periodically
@@ -558,11 +533,11 @@ mod tests {
             final_alive, elapsed, tick_count, entity_count
         );
         
-        // Verify significant progress was made (at least reduced to 10% of original)
+        // Verify significant progress was made (at least 90% reduction)
         assert!(
-            final_alive <= entity_count / 10,
-            "Should have significant reduction in AI count. Started: {}, Final: {}",
-            entity_count, final_alive
+            final_alive <= minimum_progress,
+            "Should have significant reduction in AI count. Started: {}, Final: {}, Required: ≤{}",
+            entity_count, final_alive, minimum_progress
         );
     }
 }
