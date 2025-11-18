@@ -45,8 +45,17 @@ jobs:
       - name: Build WASM module
         run: npm run build:wasm
 
+      - name: Run WASM unit tests
+        run: npm run test:wasm
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
       - name: Build site
         run: npm run build
+
+      - name: Run E2E tests
+        run: npm run test:e2e
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
