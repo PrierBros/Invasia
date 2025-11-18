@@ -3,8 +3,8 @@ use crate::data::{
     AiNeighborBuilder, AiStateUpdater, BenchmarkMetricBuilder, GridUpdateBuilder, SimulationData,
 };
 use crate::types::{AiState, SimulationSnapshot};
+use crate::utils::Instant;
 use std::mem;
-use std::time::Instant;
 
 pub struct SimulationLogic {
     data: SimulationData,
