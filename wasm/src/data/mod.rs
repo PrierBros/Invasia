@@ -113,13 +113,25 @@ impl SimulationData {
             let col = (i % divisor) * spacing;
             let grid_index = (row.min(self.grid_size - 1)) * self.grid_size + col.min(self.grid_size - 1);
             
-            // Assign this grid space to the AI
-            if grid_index < self.grid_spaces.len() {
-                self.grid_spaces[grid_index] = GridSpace::with_owner(entity.id, 5.0);
+            // Assign this grid space to the AI, ensuring uniqueness
+            let mut assigned_index = grid_index;
+            let mut found = false;
+            for offset in 0..self.grid_spaces.len() {
+                let idx = (grid_index + offset) % self.grid_spaces.len();
+                if self.grid_spaces[idx].owner.is_none() {
+                    assigned_index = idx;
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                self.grid_spaces[assigned_index] = GridSpace::with_owner(entity.id, 5.0);
                 
                 // Update entity position to be centered in their grid space
-                let grid_x = (col as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
-                let grid_y = (row as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
+                let assigned_row = assigned_index / self.grid_size;
+                let assigned_col = assigned_index % self.grid_size;
+                let grid_x = (assigned_col as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
+                let grid_y = (assigned_row as f32 + 0.5) * (2400.0 / self.grid_size as f32) - 1200.0;
                 entity.position_x = grid_x;
                 entity.position_y = grid_y;
             }
