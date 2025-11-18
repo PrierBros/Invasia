@@ -90,8 +90,11 @@ impl SpatialGrid {
     fn rebuild(&mut self, snapshots: &[EntitySnapshot]) {
         self.clear();
         for (index, entity) in snapshots.iter().enumerate() {
-            // Only track Attacking and Defending entities in the spatial grid
-            if entity.state != AiState::Attacking && entity.state != AiState::Defending {
+            // Track Attacking, Defending, and Idle entities in the spatial grid
+            if entity.state != AiState::Attacking
+                && entity.state != AiState::Defending
+                && entity.state != AiState::Idle
+            {
                 continue;
             }
 
