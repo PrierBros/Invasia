@@ -46,15 +46,12 @@ impl AiStateUpdater {
             entity.money += MONEY_PER_SPACE_PER_SEC * territory_count * time_delta_sec_f32;
         }
 
-        // AI decision making - choose action based on current state and resources
-        let mut variation = entity.next_variation();
-        if variation < 0.25 {
-            variation = 0.25;
-        }
-
-        // Check for nearby enemies
+        // AI decision making - greedy territory expansion while considering defense
+        
+        // Check for nearby enemies and threats
         let mut nearest_enemy_idx: Option<usize> = None;
         let mut nearest_enemy_dist_sq = f32::INFINITY;
+        let mut nearby_attackers = 0;
 
         grid.for_each_neighbor(
             self_snapshot.position_x,
@@ -66,48 +63,61 @@ impl AiStateUpdater {
                 debug_assert!(other_index < entity_snapshots.len());
                 let other = unsafe { entity_snapshots.get_unchecked(other_index) };
                 
-                // Only consider active (attacking) entities as threats
-                if other.state != AiState::Attacking && other.state != AiState::Defending {
-                    return;
-                }
-
                 let dx = entity.position_x - other.position_x;
                 let dy = entity.position_y - other.position_y;
                 let dist_sq = dx * dx + dy * dy;
 
-                if dist_sq < nearest_enemy_dist_sq {
+                // Count nearby attacking entities as immediate threats
+                if other.state == AiState::Attacking && dist_sq < 5000.0 {
+                    nearby_attackers += 1;
+                }
+
+                // Track nearest enemy for defensive purposes
+                if other.state != AiState::Dead && dist_sq < nearest_enemy_dist_sq {
                     nearest_enemy_dist_sq = dist_sq;
                     nearest_enemy_idx = Some(other_index);
                 }
             },
         );
 
-        // Simple AI logic: attack if strong enough, defend if threatened, otherwise idle
+        // Greedy AI logic: prioritize attacking to gain territory
         match entity.state {
             AiState::Idle => {
-                if let Some(_enemy_idx) = nearest_enemy_idx {
-                    if nearest_enemy_dist_sq < 10000.0 {
-                        // Enemy nearby, decide to defend or attack
-                        if entity.military_strength >= ATTACK_COST * 2.0 {
-                            entity.state = AiState::Attacking;
-                        } else {
-                            entity.state = AiState::Defending;
-                        }
-                    }
-                } else if entity.military_strength >= ATTACK_COST * 3.0 {
-                    // Strong enough to attack
+                // Be aggressive: attack if we have enough resources
+                // Consider defense needs if under immediate threat
+                if nearby_attackers > 0 && entity.military_strength < ATTACK_COST * 2.0 {
+                    // Under threat and low on resources, defend
+                    entity.state = AiState::Defending;
+                } else if entity.military_strength >= ATTACK_COST {
+                    // Greedy: attack whenever we have the minimum cost
+                    // This ensures AIs actively try to expand their territory
                     entity.state = AiState::Attacking;
+                } else if nearby_attackers > 0 {
+                    // Not enough to attack but under threat, defend
+                    entity.state = AiState::Defending;
                 }
+                // Otherwise stay idle and accumulate resources
             }
             AiState::Attacking => {
-                // Attacking consumes military strength
+                // Continue attacking as long as we have resources
                 if entity.military_strength < ATTACK_COST {
-                    entity.state = AiState::Idle; // Not enough strength to continue attacking
+                    // Out of resources, switch to defending or idle
+                    if nearby_attackers > 0 {
+                        entity.state = AiState::Defending;
+                    } else {
+                        entity.state = AiState::Idle;
+                    }
                 }
             }
             AiState::Defending => {
-                // Stop defending if no nearby threats
-                if nearest_enemy_idx.is_none() || nearest_enemy_dist_sq > 20000.0 {
+                // Transition from defending to attacking when safe and strong enough
+                if nearby_attackers == 0 && entity.military_strength >= ATTACK_COST * 1.5 {
+                    // No immediate threats and good resources, go on offense
+                    entity.state = AiState::Attacking;
+                } else if entity.military_strength < ATTACK_COST * 0.5 {
+                    // Very low on resources, stay idle to accumulate
+                    entity.state = AiState::Idle;
+                } else if nearby_attackers == 0 && nearest_enemy_dist_sq > 15000.0 {
                     entity.state = AiState::Idle;
                 }
             }
