@@ -56,7 +56,7 @@ impl AiStateUpdater {
 
                 if entity.military_strength > 60.0 {
                     let expansion_rate = (entity.military_strength / 100.0) * 0.1 * variation;
-                    entity.territory = (entity.territory + expansion_rate).min(100.0);
+                    entity.territory += expansion_rate;
                 }
 
                 if entity.military_strength < 50.0 {

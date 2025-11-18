@@ -127,12 +127,30 @@ impl SimulationLogic {
         if duration > 0.0 {
             self.data.metrics_mut().update_tick(duration);
         }
+
+        // Check if simulation should end (only one AI alive)
+        if self.is_complete() {
+            self.data.set_running(false);
+        }
     }
 
     pub fn update(&mut self) {
         if self.data.running() {
             self.step();
         }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        let alive_count = self.count_alive();
+        alive_count <= 1
+    }
+
+    pub fn count_alive(&self) -> usize {
+        self.data
+            .entities()
+            .iter()
+            .filter(|e| e.state != AiState::Dead)
+            .count()
     }
 
     pub fn start(&mut self) {
@@ -215,5 +233,10 @@ impl SimulationLogic {
 
     pub fn destroy(&mut self) {
         self.data.destroy();
+    }
+
+    #[cfg(test)]
+    pub fn data_mut(&mut self) -> &mut SimulationData {
+        &mut self.data
     }
 }
