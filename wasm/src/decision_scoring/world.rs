@@ -193,9 +193,37 @@ impl DecisionSystem {
         // 2. Update local fields (TI, caches)
         self.world.update_threat_indices(&self.luts);
         
-        // 3-5. Build shortlist, score, and choose for each country
+        // 2.5. First pass: identify potential attacks to detect countries under attack
+        let mut countries_under_attack: HashSet<u32> = HashSet::new();
         let mut country_ids: Vec<u32> = self.world.countries().keys().copied().collect();
         country_ids.sort(); // Ensure deterministic order
+        
+        for country_id in &country_ids {
+            if let Some(country) = self.world.get_country(*country_id) {
+                // Quick scan of shortlist to detect attack actions
+                let shortlist = generate_shortlist(
+                    *country_id,
+                    country,
+                    &self.world,
+                    &self.pruning_config,
+                );
+                
+                for action in &shortlist {
+                    if let Action::Attack { target_id } = action {
+                        countries_under_attack.insert(*target_id);
+                    }
+                }
+            }
+        }
+        
+        // 2.6. Apply defensive boost to countries under attack
+        for country_id in &countries_under_attack {
+            if let Some(country) = self.world.get_country_mut(*country_id) {
+                country.weights.apply_defensive_boost();
+            }
+        }
+        
+        // 3-5. Build shortlist, score, and choose for each country
         let mut decisions: HashMap<u32, (Action, f32, ScoreComponents)> = HashMap::new();
         
         for country_id in country_ids {
@@ -645,5 +673,60 @@ mod tests {
         
         // Verify logs are generated
         assert!(system.logs.len() > 0);
+    }
+
+    #[test]
+    fn test_defensive_boost_when_under_attack() {
+        // Test that countries under attack prioritize defensive actions
+        let mut system = DecisionSystem::init(42);
+        
+        // Create two countries
+        system.add_country(1);
+        system.add_country(2);
+        
+        // Set up edges with high hostility (country 1 will likely attack country 2)
+        system.add_edge(1, 2, 1, 0.9);  // High hostility from 1 to 2
+        system.add_edge(2, 1, 1, 0.9);
+        
+        // Give country 1 more resources and military to make it likely to attack
+        if let Some(country1) = system.world.get_country_mut(1) {
+            country1.m_eff = 200.0;
+            country1.resources = 1500.0;
+        }
+        
+        // Give country 2 some border tiles to enable fortify actions
+        if let Some(country2) = system.world.get_country_mut(2) {
+            let mut tile1 = BorderTile::new(1, 0, 0);
+            tile1.threat_gradient = 10.0;
+            country2.border_tiles.push(tile1);
+            
+            let mut tile2 = BorderTile::new(2, 1, 0);
+            tile2.threat_gradient = 8.0;
+            country2.border_tiles.push(tile2);
+        }
+        
+        // Run a tick
+        system.tick();
+        
+        // Check the logs
+        let country2_log = system.logs.iter().find(|log| log.country_id == 2);
+        
+        if let Some(log) = country2_log {
+            // If country 2 was under attack, beta (security weight) should be maxed
+            let country1_action = system.logs.iter()
+                .find(|l| l.country_id == 1)
+                .map(|l| l.chosen_action.as_str());
+            
+            if let Some(action) = country1_action {
+                if action.contains("Attack country 2") {
+                    // Country 2 should have boosted security weight
+                    assert_eq!(log.weights.beta, 16, "Security weight should be maxed when under attack");
+                    
+                    // And reduced resource/growth weights
+                    assert!(log.weights.alpha <= 8, "Resource weight should be reduced when under attack");
+                    assert!(log.weights.gamma <= 8, "Growth weight should be reduced when under attack");
+                }
+            }
+        }
     }
 }
