@@ -4,7 +4,7 @@ A modern website built with [Astro](https://astro.build), featuring **Svelte wit
 
 ## 🚀 Live Demo
 
-The site is automatically deployed to GitHub Pages at: https://jprier.github.io/Invasia
+The site is automatically deployed to GitHub Pages at: [https://prierbros.github.io/Invasia](https://prierbros.github.io/Invasia/)
 
 ## ✨ Features
 
